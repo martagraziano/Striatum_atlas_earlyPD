@@ -56,9 +56,13 @@ The repository is organized as follows:
 
     - snRNA_seq/Mouse datasets: Code to analize and to generate figures for mouse datasets. Divided in two subfolders, for analysis of the full dataset and subclustering.
 
-        - snRNA_seq/Mouse datasets/Analysis_full_dataset
-        - snRNA_seq/Mouse datasets/Sub_clustering_SPNs_mouse
+       - snRNA_seq/Human datasets/Analysis_full_dataset
+       - snRNA_seq/Human datasets/Sub_clustering_SPNs_mouse
+          
+    - snRNA_seq/Human datasets: Code to analize and to generate figures for mouse datasets. Divided in two subfolders, for analysis of the full dataset and subclustering.
 
+       - snRNA_seq/Human datasets/Analysis_full_dataset
+       - snRNA_seq/Human datasets/Sub_clustering_SPNs_human
 
 - Spatial_Transcriptomics/: Code to analize and to generate figures and analyzing spatial transcriptomics datasets.
 
