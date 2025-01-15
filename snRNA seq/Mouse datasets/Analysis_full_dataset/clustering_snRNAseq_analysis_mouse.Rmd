@@ -22,40 +22,9 @@ cat(paste(Sys.Date()))
 
 # Load Libraries
 
-```{r eval=FALSE}
-#remotes::install_github('chris-mcginnis-ucsf/DoubletFinder')
-#rmarkdown::render(input = "/Users/yuvarani.masarapu/Documents/parkinsons_project/sn_parkinsons_mitopark_combined/clustering_parkinsons_combined.Rmd", output_file = "/Users/yuvarani.masarapu/Documents/parkinsons_project/sn_parkinsons_mitopark_combined/clustering_combined.html")
-```
 
 ```{r warning=FALSE, message=FALSE, eval=FALSE}
-# install glmGamPoi
-
-#if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
-#BiocManager::install("glmGamPoi")
-# install sctransform from Github
-#install.packages("sctransform")
-quartz<-function(width,height){windows(width, height)}
-install.packages("devtools")
-library(devtools)
-remotes::install_version("Seurat", "4.4.0", repos = c("https://satijalab.r-universe.dev", getOption("repos")))
-library(Seurat)
-remotes::install_version("SeuratObject", "4.1.4", repos = c("https://satijalab.r-universe.dev", getOption("repos")))
-library(SeuratObject)
-install.packages("hdf5r")
-library(hdf5r)
-library(sctransform)
-install.packages("harmony")
-library(harmony)
-remotes::install_github("chris-mcginnis-ucsf/DoubletFinder")
-library(DoubletFinder)
-library(patchwork)
-library(Matrix)
-library(ggplot2)
-library(dplyr)
-install.packages("openxlsx")
-library(openxlsx)
-# set this option when analyzing large datasets
-options(future.globals.maxSize = 3e+09)
+# load libraries from script "libraries.R"
 ```
 
 Custom function for selecting estimated doublet rate based on cells recovered from library
@@ -161,12 +130,10 @@ run_doublet_finder <- function(x, do_plot = T, header = "") {
 
 # Read count matrix into R as seurat object
 
-Count data from all mice samples of mitopark and 6OHDA models are combined. The sample labels are replaced to new from old labels as below.
+Count data from all mice samples of mitopark and 6OHDA models are combined.two possible ways, either reopen the raw matrices and combine them in a new seurat object or merge exsting raw seurat object from the experiments and merge them into one.
 
 ```{r load_data, message=FALSE, eval=FALSE, warning=FALSE}
-library(tidyverse)
-library(Matrix)
-library(cowplot)
+
 theme_set(theme_cowplot())
 setwd("C:/Users/magraz/OneDrive - Karolinska Institutet/Parkinson Project-common folder")
 indir <- "C:/Users/magraz/OneDrive - Karolinska Institutet/Parkinson Project-common folder/Counts_cellranger/"
@@ -197,22 +164,13 @@ seurat_list <- lapply(files, function(file_n){
   # create seurat object
   cur_seurat <- CreateSeuratObject(
     counts = mat,
-    project = "6OHDA"
+    project = ""
   )
   cur_seurat@meta.data$SampleID <- file_n
   
   cur_seurat
 
 })
-
-new_sample_names <- c("15a", "15b", "15c", "15d", "18a", "18d", "C4", "C5")
-sample_type <- c("Mitopark_15", "Mitopark_15", "Mitopark_15", "Mitopark_15", "Mitopark_18", "Mitopark_18", "Control", "Control")
-sample_group <- c("Treated", "Treated", "Treated", "Treated", "Treated", "Treated", "Control", "Control")
-for(i in 1:length(seurat_list)){
-  seurat_list[[i]]$Sample <- new_sample_names[i]
-  seurat_list[[i]]$Sample_type <- sample_type[i]
-  seurat_list[[i]]$Sample_group <- sample_group[i]
-}
 
 gc()
 ```
@@ -221,10 +179,9 @@ gc()
 # merge into one big seurat object
 seurat_rna <- merge(x=seurat_list[[1]], y=seurat_list[2:length(seurat_list)])
 rm(seurat_list)
-```
 
-```{r cellcyclescoring, message=FALSE, verbose=FALSE, eval=FALSE}
-# Classify each cell by cell-cycle phase (G2M/G1/S) and give cellcycle scoring
+#or merge existing seurat objects from the two models used 
+
 seurat_rna_mp<- readRDS("C:/Users/magraz/OneDrive - Karolinska Institutet/Parkinson Project-common folder/analysis_results/sn_data/clustering_mitopark/data/raw_combined_mt_11_15_18.rds")
 seurat_rna_6ohda<- readRDS("C:/Users/magraz/OneDrive - Karolinska Institutet/Parkinson Project-common folder/analysis_results/sn_data/clustering_6OHDA/data/raw_combined.rds")
 
@@ -239,6 +196,19 @@ seurat_rna <- merge(seurat_rna_mp, y = seurat_rna_6ohda,  project = "sRNA seq")
 IDS<-unique(seurat_rna$Sample)
 rm(seurat_rna_mp)
 rm(seurat_rna_6ohda)
+
+#add information about sample name and sample group to each sample
+
+seurat_rna$Sample_group <- colnames(seurat_rna)
+
+seurat_rna$Sample_group[seurat_rna$Sample %in% c("15a", "15b", "15c","15d","18a", "18d")] <- "Mitopark15_18"
+seurat_rna$Sample_group[seurat_rna$Sample %in% c("MP1", "MP2", "MP3")] <- "Mitopark_11"
+seurat_rna$Sample_group[seurat_rna$Sample %in% c("C1", "C2", "C3", "C4", "C5", "Control_1", "Control_2" ,"Control_3")] <- "Control"
+seurat_rna$Sample_group[seurat_rna$Sample %in% c("6OHDA_1", "6OHDA_2", "6OHDA_3")] <- "6OHDA"
+```
+
+```{r cellcyclescoring, message=FALSE, verbose=FALSE, eval=FALSE}
+# Classify each cell by cell-cycle phase (G2M/G1/S) and give cellcycle scoring
 
 setwd("Z:/dmclab/Marta/Combined_snRNAseq")
 
@@ -268,19 +238,6 @@ Let's check the size of data (nuclei count) for each sample
 
 ```{r data_size_plots, warning=FALSE, message=FALSE, fig.height=4, fig.width=4}
 # use table function to get the number of cells in each Sample as a dataframe
-seurat_rna$Sample_group <- colnames(seurat_rna)
-
-seurat_rna$Sample_group[seurat_rna$Sample %in% c("15a", "15b", "15c","15d","18a", "18d")] <- "Mitopark15_18"
-seurat_rna$Sample_group[seurat_rna$Sample %in% c("MP1", "MP2", "MP3")] <- "Mitopark_11"
-seurat_rna$Sample_group[seurat_rna$Sample %in% c("C1", "C2", "C3", "C4", "C5", "Control_1", "Control_2" ,"Control_3")] <- "Control"
-seurat_rna$Sample_group[seurat_rna$Sample %in% c("6OHDA_1", "6OHDA_2", "6OHDA_3")] <- "6OHDA"
-
-
-# seurat_rna_tot <- readRDS(file = "C:/Users/magraz/OneDrive - Karolinska Institutet/Parkinson Project-common folder/analysis_results/sn_data/clustering_mitopark/data/raw_combined_mt_11_15_18.rds")
-# 
-# seurat_ctrl<- readRDS("C:/Users/magraz/OneDrive - Karolinska Institutet/snRNAsequencing data Striatum/control_dataset.rds")
-# seurat_rna_tot$Sample[seurat_rna_tot$Sample %in% c("MP1", "MP2", "MP3")] <- c("11a","11b","11c")
-
 df <- as.data.frame(table(rna.combined$Sample))
 colnames(df) <- c('Sample', 'n_cells')
 
@@ -294,7 +251,7 @@ p <- ggplot(df, aes(y=n_cells, x=reorder(Sample, Sample), fill=Sample)) +
   ggtitle(paste('Total cells:', sum(df$n_cells))) +
   theme_classic()+
   theme(legend.position = "none")
-  plot_filename <- paste0("Z:/dmclab/Marta/Combined_snRNAseq/stat_plots/barplot_n_afterfilt", ".pdf")
+  plot_filename <- paste0("Z:/dmclab/Marta/Combined_snRNAseq/stat_plots/barplot_n_beforefilt", ".pdf")
   pdf(plot_filename, width = 9, height = 4)  # Adjust width and height as desired
   print(p)
   dev.off()
@@ -307,7 +264,7 @@ p
 df1 <- as.data.frame(table(seurat_rna$Sample_group))
 colnames(df1) <- c('Sample_group', 'n_cells')
 
-# bar plot of the number of cells in each sample
+# bar plot of the number of cells in each sample group
 p1 <- ggplot(df1, aes(y=n_cells, x=reorder(Sample_group, Sample_group), fill=Sample_group)) +
   geom_bar(stat='identity') +
   geom_text(aes(label = n_cells), vjust = 1.5, colour = "black") +
@@ -323,9 +280,6 @@ p1 <- ggplot(df1, aes(y=n_cells, x=reorder(Sample_group, Sample_group), fill=Sam
 #png('figures/basic_cells_per_sample.png', width=9, height=4, res=200, units='in')
 
 p1
-```
-
-```         
 ```
 
 # Before filtering
@@ -393,8 +347,8 @@ rm(p1,p2)
 -   Overexpressed Malat1 gene, \n
 -   mitochondrial and ribosomal genes \n
 -   All genes with 0 transcripts detected
--   nFeature [250, 10000]
--   nCount [300, 75000]
+-  nFeature_RNA > 300 & nFeature_RNA < 10000 & nCount_RNA > 400 &  nCount_RNA < 75000
+- genes related to X or Y chromosome detected and removed manually
 -   Genes per UMI per cell ratio above 0.82 (gives an idea of the complexity of each cell)
 
 ```{r filtering, warning=FALSE}
@@ -402,6 +356,23 @@ rm(p1,p2)
 
 #remove counts variable from previous step
 rm(C)
+
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("biomaRt")
+library(biomaRt)
+
+mart <- useMart(biomart="ensembl", dataset="mmusculus_gene_ensembl")
+Y_Genes <- getBM(attributes = c("chromosome_name",  "mgi_symbol"),
+           filters = "chromosome_name", values = "Y", mart = mart)
+X_Genes <- getBM(attributes = c("chromosome_name",  "mgi_symbol"),
+           filters = "chromosome_name", values = "X", mart = mart)
+
+genes_to_remove <- c("Malat1","Xist", "Uty", "Tsix",'Ddx3y', "Ddx3x", "Tbl1x","Usp9x","Jpx","Ftx","Tsnax","Pcdh11x", 'Eif2s3y',"Eif2s3x","Tmsb4x","Tmsb4y", 'Kdm5d')
+genes_to_remove<- c(genes_to_remove,Y_Genes$hgnc_symbol, X_Genes$hgnc_symbol )
+# Filter out genes from the Seurat object
+seurat_rna <- seurat_rna[!rownames(seurat_rna) %in% genes_to_remove, ]
 
 #Remove MALAT1 and x related genes
 seurat_rna <- seurat_rna[!grepl(c("Malat1","Xist", "Uty", "Tsix",'Ddx3y', "Ddx3x", "Tbl1x","Usp9x","Jpx","Ftx","Tsnax","Pcdh11x", 'Eif2s3y',"Eif2s3x","Tmsb4x","Tmsb4y", 'Kdm5d'), rownames(seurat_rna))]
@@ -701,8 +672,6 @@ rna.combined <- RunUMAP(object = rna.combined, dims = 1:42, assay = "SCT", seed.
 saveRDS(rna.combined, file = "Z:/dmclab/Marta/Combined_snRNAseq/secondoround/rna.combined_snRNAseq_integrated.rds") 
 ```
 
-Control_4 \<- C1 Control_5 \<- C2 Mitopark_1 \<- MP1 Mitopark_2 \<- MP2 Mitopark_3 \<- MP3 6OHDA_1 \<- new_6OHDA_1 6OHDA_2 \<- new_6OHDA_2 6OHDA_3 \<- new_6OHDA_3 Control_1 \<- new_control_1 Control_2 \<- new_control_2 Control_3 \<- old_control_1
-
 
 ```{r UMAP_beforebatcheffects, message=FALSE, fig.width=16, fig.height=14, fig.show='hold'}
 p1 <- DimPlot(object = rna.combined, group.by = "Sample", reduction = "umap_before_harmony") + ggtitle("Before batch correction (spots grouped by sample)")
@@ -879,130 +848,31 @@ write.csv(table2, file="Z:/dmclab/Marta/Combined_snRNAseq/new_allen_based_cluste
 ### Top 5 markers for each cluster
 
 -   Genes included only if they are expressed in atleast 10% of cells, hence not testing infrequently expressed genes within the two populations being compared. Here in this case, markers for cluster X mean cluster X vs all other clusters.
--   *adjusted p-value* threshold used here is 0.05
+-   *adjusted p-value* threshold used here is 0.01
 -   genes ordered also by *average log FC* values
 
 ```{r verbose=FALSE, warning=FALSE, message=FALSE, eval=FALSE}
-DefaultAssay(rna.combined) <- "SCT"
+set.seed(61)
+rna.combined <- FindNeighbors(object = rna.combined, assay = "SCT", dims = 1:42, k.param = 23, graph.name = "graph_afterHarmony", reduction = "harmony_sid_3")
 
+rna.combined <- FindClusters(object = rna.combined, pc.use = 1:42, resolution = 0.4, save.SNN = T, do.sparse = T, graph.name = "graph_afterHarmony", random.seed = 13, group.singletons = TRUE)
 
-rna.combined <- PrepSCTFindMarkers(object = rna.combined_all, assay = "SCT", verbose = TRUE)
+rna.combined <- PrepSCTFindMarkers(object = rna.combined, assay = "SCT", verbose = TRUE)
 wnn_markers <- FindAllMarkers(rna.combined_all, only.pos = TRUE, min.pct = 0.10, logfc.threshold = 0.25)
 wnn_markers <- wnn_markers[wnn_markers$p_val_adj < 0.01, ]
+
 write.csv(wnn_markers, file = "Z:/dmclab/Marta/Combined_snRNAseq/new_allen_based_clustering/cluster_snRNAseq_combined_42Pcs_res0.4_annotation_allen2.csv", col.names = TRUE, row.names = TRUE)
 
 wnn_markers<- read.csv("Z:/dmclab/Marta/Combined_snRNAseq/new_allen_based_clustering/cluster_snRNAseq_combined_42Pcs_res0.4_annotation_allen_2.csv")
+#remove genes that have not been identified or explained because they would not help in classifiyng the cell types
 df_filtered <- wnn_markers[!grepl("^Gm|Rik$", wnn_markers$gene), ]
 top5_2<-df_filtered %>%   
     group_by(cluster) %>%
     slice_max(n =10, order_by = avg_log2FC) %>%
     print(n = 1000)
 
-genes_heatmap <- top5_2[,c(3,7,8)]
-
-genes_heatmap$cluster <- factor(genes_heatmap$cluster, levels=clusters)
-
 ```
 
-```{r warning=FALSE, message=FALSE, results='asis'}
-#make sure that the markers are representative for the clusters, and that they are present in all conditions
-DefaultAssay(rna.combined) <- "RNA"
-
-
-# cons.markers <- FindConservedMarkers(rna.combined, ident.1 = , grouping.var = "Sample_group", verbose = FALSE)
-
-# Create an empty dataset to store the results
-cons_markers_dataset <- data.frame()
-
-# Get unique values of the "userat_cluster" column
-unique_ident_values <- unique(rna.combined$seurat_cluster)
-
-# Loop through unique_ident_values
-for (ident_value in unique_ident_values) {
-  # Execute the function with the current ident_value
-  cons_markers <- FindConservedMarkers(rna.combined, ident.1 = ident_value, grouping.var = "Sample_group", verbose = FALSE)
-  
-  # Add the ident_value to the result for reference
-  cons_markers$ident_value <- ident_value
-  
-  # Append the current result to the dataset
-  cons_markers_dataset <- rbind(cons_markers_dataset, cons_markers)
-}
-
-# View the resulting dataset
-print(cons_markers_dataset)
-
-```
-
-```{r warning=FALSE, message=FALSE, results='asis'}
-
-
-markers<-c("Mbp","Tnc","Cx3cr1","Slc1a3","Sox10","Pdgfra","Gfap","Aldh1l1","Slc17a7","Slc17a6" ,"Slc32a1","Gad2","Sst","Npy","Pvalb", "Chat", "Ache","Slc18a3","Gpr6","Ppp1r1b","Rgs9" ,"Gpr88","Adora2a","Drd2","Penk","Pdyn","Tac1","Drd1","Col11a1","Sema5b","Oprm1","Th")
-d1_markers<- c("Gpr149", "Fam155a", "Syt6", "Neto2", "Rgs20", "Homer1", "Kcnj3", "Drd3", "Kremen1", "Egr1", "Lrrk2", "Tshz1", "Nr4a1")
-st_markers<- c("Calb1","Cck","Ptgds","Enpp2", "Lars2","Cldn11","Arc", "Egr1","Avp","Col11a1","Tac1","Rgs2","Bc1","Pde7b","Otof","Nts")
-
-all_genes<- c(d1_markers,st_markers,markers)
-
-mark1<- c( "Nrxn1", "Nrxn3", "Dlg2", "Nlgn1","Grin3a", "Glra2", "Glra3",  "Gpr158")
-mark_poster<- c("Drd1","Adora2a","Sema5b","Kremen1", "Tac1","Nr4a1","Rgs20","Rgs2","Homer1", "Syt6","Neto3")
-```
-
-```{r markers_dotplot, warning=FALSE, message=FALSE, verbose=FALSE, fig.width=18, fig.height= 10}
-
-
-my_table<- as.data.frame(table("cluster" = rna.combined@active.ident, rna.combined@meta.data$orig.ident))
-
-
-p <- DimPlot(object = rna.combined, group.by = "seurat_clusters", reduction = "umap_after_harmony_3",
-             pt.size = 0.6, label = TRUE, label.size = 6)+ggtitle("Clustering of all Mitopark samples snRNA seq data")
-
-# Create the table_plot and use the cluster colors
-table_plot <- ggplot(my_table, aes(x = cluster, y = Freq, fill = cluster)) +
-  geom_col() +
-
-  labs(x = "counts", y = "Cluster") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),
-        panel.grid = element_blank())
-
-plot<- p+ table_plot
-#plot<- grid.arrange(p, table_plot, ncol = 2)
-plot_filename <- paste0(plot_directory, "/ALL_UMAP_42PC_RES0.4", ".pdf")
-  #png(plot_filename, width = 600, height = 600) 
-pdf(plot_filename, width = 16, height = 8)  # Adjust width and height as desired
-print(plot)
-dev.off()
-top5_2 <- df_filtered %>%
-  group_by(cluster) %>%
-  slice_max(n = 5, order_by = avg_log2FC) %>%
-  filter(row_number() %in% 1:5)
-
-genes <- c("Mbp", "Prr5l", "Mog", "Inpp5d", "Cx3cr1", "Siglech", "Ly86", "Rgs9", "Gpr88", "Ppp1r1b", 
-           "Drd1", "Tac1", "Pdyn", "Drd2", "Penk", "Adora2a", "Car10", "Tafa1", "Slc17a7", "Slc1a3", 
-           "Aldh1l1", "Tnc", "Gfap", "Slco1c1", "Sst", "Npy", "Pvalb", "Kcnmb2", "Pdgfra")
-
-
-# Define your custom order for the clusters
-# Define your custom order for the clusters
-custom_order <- c("oligodendrocytes", "Microglia","Astrocytes", "OPCs", "Cortex", "Striatum D1", "Striatum D2","Cholinergic Interneurons", "Interneurons")  
-d3<-DotPlot(rna.combined_all, features =unique(top5_2$gene)) +
-  scale_colour_gradientn(colours =rev(c("white","gray", "#B34B50", "#5F070C","#240705") )%>% rev()) + labs(y = "cluster")+
-   theme(axis.text.x = element_text(angle = 90, vjust = 0, hjust=0))+
-  scale_x_discrete(position = "bottom") +
-  #scale_y_discrete(limits = rev(custom_order)) +
-  theme(axis.text = element_text(family = "sans", size = 8),
-        axis.title = element_text(family = "sans", size = 6),
-        legend.key.size = unit(5, units = "mm"),
-        legend.text = element_text(family = "sans", size = 5),
-        legend.title = element_text(family = "sans", size = 6))+
- scale_size(range = c(1,8))+
-  coord_flip()
-plot_filename <- paste0(plot_directory, "/top5_markers_annotated2", ".pdf")
-pdf(plot_filename, width = 6, height = 20)  # Adjust width and height as desired
-print(d3)
-dev.off()
-
-```
 
 ### Cluster markers on UMAP
 
@@ -1063,15 +933,7 @@ write.csv(data.frame(gene_names = rownames(expression_matrix)), "Z:/dmclab/Marta
 
 print("Matrix and metadata saved as CSV.")
 
-
-writeH5AD(anndata_obj, "Z:/dmclab/Marta/Combined_snRNAseq/filtered_expression_with_metadata.h5ad")
-
-# Store sample-based metadata in a dataframe called obs
-obs = rownames(count_matrix)
-	 
-# Store gene-based metadata in a dataframe called var2
-var2 = colnames(count_matrix)
-
+#generate .h5ad file on python with a custom script (see .py scrpt)
 
 #load results 
 
@@ -1119,26 +981,21 @@ head(rna.combined@meta.data)
 DefaultAssay(rna.combined) <- "SCT"
 ```
 
-
-## Let's check UMAPs for these known markers
-
-**Harmony**:
-
-for 6OHDA: umap_after_harmony
-
-for Mitopark: umap_after_harmony_3
-
-for combined:umap_after_harmony_3
+Adjust resolution of 
+for combined:umap_after_harmony_3 and rerun clustering to adjust resultion according to what cell types are defined by the Allen mapmycell tool and our manual annotations combined
 
 ```{r umap_clusters2, fig.height=7, fig.width=18}
 #pie(rep(1,length(cl.colors)), col = cl.colors)
+set.seed(61)
+# Save the old clustering results
+rna.combined$clusters_res0.4 <- rna.combined$seurat_clusters
 
+rna.combined <- FindNeighbors(object = rna.combined, assay = "SCT", dims = 1:42, k.param = 23, graph.name = "graph_afterHarmony", reduction = "harmony_sid_3")
+rna.combined <- FindClusters(object = rna.combined, pc.use = 1:42, resolution = 1.5, save.SNN = T, do.sparse = T, graph.name = "graph_afterHarmony", random.seed = 13, group.singletons = TRUE)
 
-rna.combined<- readRDS("Z:/dmclab/Marta/Combined_snRNAseq/data/rna.combined.snRNA_seq_merged_42_res1.5_annotated_allen.rds")
-p<-DimPlot(object = rna.combined, group.by = "cluster_name2", reduction = "umap_after_harmony_3", pt.size = 0.6, label = T, label.size = 6) + ggtitle("Clusters in combined snRNAseq dataset")
-#check that the levels are actually in the order or Idents
-Idents(rna.combined)
-#annotation for combined dataset
+rna.combined <- PrepSCTFindMarkers(object = rna.combined, assay = "SCT", verbose = TRUE)
+wnn_markers <- FindAllMarkers(rna.combined, only.pos = TRUE, min.pct = 0.10, logfc.threshold = 0.25)
+wnn_markers <- wnn_markers[wnn_markers$p_val_adj < 0.01, ]
 
 
 p <-  DimPlot(
@@ -1191,9 +1048,6 @@ rna.combined_all$clusters <- Idents(rna.combined_all)
 
 cl.colors <-  c("#F5D3C8", "#558877ff","#0a4347ff","#b89a01ff","#B95F89","#484444ff","#dace7eff","#977482ff","#061c8dff","#FCCDE5","#856fa7ff","#102c52","#5F070C")
 
-cl.colors2 <-  c("#F5D3C8", "#878787","#0a4347ff","#878787","#878787","#878787","#878787","#878787","#878787","#878787","#878787","#878787")
-
-saveRDS(rna.combined_all, "Z:/dmclab/Marta/Combined_snRNAseq/data/rna.combined.snRNA_seq_merged_42_res0.4_annotated_allen.rds")
 # Set a directory to save the plots
 plot_directory <- "Z:/dmclab/Marta/Combined_snRNAseq/new_allen_based_clustering"
 
@@ -1416,16 +1270,8 @@ lapply(unique(vars), function(gene){
     message(paste("Error with gene:", gene, " - Skipping to next..."))
     # Continue with the next gene if there's an error
   })
-)
- #      
- # myplot1 <-FeaturePlot(rna.combined, features = gene, reduction = "umap_after_harmony", slot = "data",label=TRUE )+ggtitle("Subclustering")& theme(legend.position = "right") 
- # 
- # # Save the plot
- # # Save the plot as PDF
- #  plot_filename <- paste0(plot_directory, "/", gene, "_sub_marker_norm_grey.pdf")
- #  pdf(plot_filename, width = 8, height = 6)  # Adjust width and height as desired
- #  print(myplot1)
- #  dev.off()
+ })
+
 
 
 ```
@@ -2279,316 +2125,3 @@ m1_forplots<- subset(m1_forplots, cluster %in% c("Striatum D1", "Striatum D2", "
 write.xlsx(m1_forplots, file="Z:/dmclab/Marta/Combined_snRNAseq/plot yuvarani.xlsx")
 ```
 
-```{r}
-
-
-
-#let'sonly get significat positive genes
-clusters<- unique(de_6ohda$cluster)
-
-
-GO_common<- data.frame()
-
-for (clust in clusters) {
-  subset_data_6ohda <- de_genes_6ohda[[clust]]
-  subset_data_6ohda_down <- subset_data_6ohda[subset_data_6ohda$p_val_adj < 0.0001 & subset_data_6ohda$avg_log2FC < 0, ]
-  subset_data_6ohda_up <- subset_data_6ohda[subset_data_6ohda$p_val_adj < 0.0001 &  subset_data_6ohda$avg_log2FC > 0, ]
-#gene_to_test <- rownames(subset_data[subset_data$p_val_adj < 0.01 & (subset_data$avg_log2FC < -0.3 | subset_data$avg_log2FC > 0.3), ])
- gene_to_test_down <- subset_data_6ohda_down$Gene
-GO_results<- enrichGO(gene= gene_to_test_down, OrgDb = "org.Mm.eg.db", keyType = "SYMBOL", ont = "MF") 
-
-GO_results_Df<-as.data.frame(GO_results)
-GO_results_Df <- GO_results_Df %>%
-  mutate(Bgratio_value = as.numeric(strsplit(BgRatio, "/") %>% sapply(function(x) x[1])))
-filtered_GO_results_down <- GO_results_Df %>%
-    slice_max(n = 40, order_by = as.numeric(Count))
- filtered_GO_results_down <- filtered_GO_results_down %>% add_column(cluster=clust, reg= "downreg")
- GO_common<- rbind(GO_common, filtered_GO_results_down)
- 
- gene_to_test_up <- subset_data_6ohda_up$Gene
-GO_results<- enrichGO(gene= gene_to_test_up, OrgDb = "org.Mm.eg.db", keyType = "SYMBOL", ont = "MF") 
-GO_results_Df<-as.data.frame(GO_results)
-GO_results_Df <- GO_results_Df %>%
-  mutate(Bgratio_value = as.numeric(strsplit(BgRatio, "/") %>% sapply(function(x) x[1])))
-filtered_GO_results_up <- GO_results_Df %>%
-    slice_max(n = 40, order_by = as.numeric(Count))
- filtered_GO_results_up <- filtered_GO_results_up %>% add_column(cluster=clust, reg= "upreg")
- GO_common<- rbind(GO_common, filtered_GO_results_up) 
-
-}
-GO_common$Experiment<- "6OHDA"
-
-GO_commonMp<- data.frame()
-
-for (clust in clusters) {
-  subset_data_mp <- de_genes_mp[[clust]]
-  subset_data_mp_down <- subset_data_mp[subset_data_mp$p_val_adj < 0.0001 & subset_data_mp$avg_log2FC < 0, ]
-  subset_data_mp_up <- subset_data_mp[subset_data_mp$p_val_adj < 0.0001 &  subset_data_mp$avg_log2FC > 0, ]
-#gene_to_test <- rownames(subset_data[subset_data$p_val_adj < 0.01 & (subset_data$avg_log2FC < -0.3 | subset_data$avg_log2FC > 0.3), ])
- gene_to_test_down <- subset_data_mp_down$Gene
-GO_results<- enrichGO(gene= gene_to_test_down, OrgDb = "org.Mm.eg.db", keyType = "SYMBOL", ont = "MF") 
-
-GO_results_Df<-as.data.frame(GO_results)
-GO_results_Df <- GO_results_Df %>%
-  mutate(Bgratio_value = as.numeric(strsplit(BgRatio, "/") %>% sapply(function(x) x[1])))
-filtered_GO_results_down <- GO_results_Df %>%
-    slice_max(n = 40, order_by = as.numeric(Count))
- filtered_GO_results_down <- filtered_GO_results_down %>% add_column(cluster=clust, reg= "downreg")
- GO_commonMp<- rbind(GO_commonMp, filtered_GO_results_down)
- 
- gene_to_test_up <- subset_data_mp_up$Gene
-GO_results<- enrichGO(gene= gene_to_test_up, OrgDb = "org.Mm.eg.db", keyType = "SYMBOL", ont = "MF") 
-GO_results_Df<-as.data.frame(GO_results)
-GO_results_Df <- GO_results_Df %>%
-  mutate(Bgratio_value = as.numeric(strsplit(BgRatio, "/") %>% sapply(function(x) x[1])))
-filtered_GO_results_up <- GO_results_Df %>%
-    slice_max(n = 40, order_by = as.numeric(Count))
- filtered_GO_results_up <- filtered_GO_results_up %>% add_column(cluster=clust, reg= "upreg")
- GO_commonMp<- rbind(GO_commonMp, filtered_GO_results_up) 
-
-}
-GO_commonMp$Experiment<- "Mitopark15_18"
-GO_common_genes<- data.frame()
-
-m1_filter<-  subset(m1, agreement == "Convergent")
-
-for (clust in cluster) {
-  subset_data_common<-subset(m1_filter, cluster== clust)
-  avg<- cbind(subset_data_common$avg_log2FC_6ohda, subset_data_common$avg_log2FC_mp)
-subset_data_common$mean <- rowMeans(avg)
-  subset_data_mp_down <- subset_data_common[ subset_data_common$mean < 0, ]
-  subset_data_mp_up <- subset_data_common[   subset_data_common$mean > 0, ]
-#gene_to_test <- rownames(subset_data[subset_data$p_val_adj < 0.01 & (subset_data$avg_log2FC < -0.3 | subset_data$avg_log2FC > 0.3), ])
- gene_to_test_down <- subset_data_mp_down$gene
-
-GO_results<- enrichGO(gene= gene_to_test_down, OrgDb = "org.Mm.eg.db", keyType = "SYMBOL", ont = "MF") 
-
-GO_results_Df<-as.data.frame(GO_results)
-
-if (nrow(GO_results_Df) < 1){
-  next  
-}else{
-  GO_results_Df <- GO_results_Df %>%
-  mutate(Bgratio_value = as.numeric(strsplit(BgRatio, "/") %>% sapply(function(x) x[1])))
-filtered_GO_results_down <- GO_results_Df %>%
-    slice_max(n = 40, order_by = as.numeric(Count))
- filtered_GO_results_down <- filtered_GO_results_down %>% add_column(cluster=clust, reg= "downreg")
- GO_common_genes<- rbind(GO_common_genes, filtered_GO_results_down)
- 
- gene_to_test_up <- subset_data_mp_up$gene
-GO_results<- enrichGO(gene= gene_to_test_up, OrgDb = "org.Mm.eg.db", keyType = "SYMBOL", ont = "MF") 
-GO_results_Df<-as.data.frame(GO_results)
-GO_results_Df <- GO_results_Df %>%
-  mutate(Bgratio_value = as.numeric(strsplit(BgRatio, "/") %>% sapply(function(x) x[1])))
-filtered_GO_results_up <- GO_results_Df %>%
-    slice_max(n = 40, order_by = as.numeric(Count))
- filtered_GO_results_up <- filtered_GO_results_up %>% add_column(cluster=clust, reg= "upreg")
- GO_common_genes<- rbind(GO_common_genes, filtered_GO_results_up) 
-
- }
-
-}
-GO_common_genes$Experiment<- "Common"
-
-Gene_ontology<- rbind(GO_common, GO_commonMp)
-write.xlsx(Gene_ontology, file = "Z:/dmclab/Marta/Combined_snRNAseq/GO_mostfreq_DEGs_withcommonP0001_pval0.5.xlsx")
-Gene_ontology_all<- read.xlsx("Z:/dmclab/Marta/Combined_snRNAseq/GO_mostfreq_DEGs.xlsx")
-
-# Extract common values from the 'ID' column
-common_ids <- intersect(GO_commonMp$Description, GO_common$Description)
-
-# Filter df1 and df2 to keep only the rows with common IDs
-df1_common <- GO_commonMp[GO_commonMp$Description %in% common_ids, ]
-df2_common <- GO_common[GO_common$Description %in% common_ids, ]
-
-Gene_ontology_common<- rbind(df1_common, df2_common)
-write.xlsx(Gene_ontology_common, file = "Z:/dmclab/Marta/Combined_snRNAseq/GO_mostfreq_common_across_models_DEGs.xlsx")
-
-# Extract unique values from the 'Description' column in Gene_ontology
-all_descriptions <- Gene_ontology$Description
-
-# Extract unique values from the 'Description' column in Gene_ontology_common
-common_descriptions <- Gene_ontology_common$Description
-
-# Find descriptions in Gene_ontology that are not present in Gene_ontology_common
-in_common <- innerjoin(all_descriptions, common_descriptions)
-
-# Filter Gene_ontology to keep only the rows with descriptions not in Gene_ontology_common
-not_in_common_rows <- Gene_ontology[Gene_ontology$Description %in% not_in_common, ]
-write.xlsx(not_in_common_rows, file = "Z:/dmclab/Marta/Combined_snRNAseq/GO_mostfreq_not_common_across_models_DEGs.xlsx")
-Gene_ontology_common<- read.csv("Z:/dmclab/Marta/Combined_snRNAseq/GO_mostfreq_common_across_models_DEGs_sel.csv")
-Gene_ontology<- read_xlsx("Z:/dmclab/Marta/Combined_snRNAseq/GO_mostfreq_DEGs_withcommon_sel.xlsx")
-
-clusters<- c("Cortex", "Striatum D1", "oligodendrocytes", "Striatum D2")
-plot_directory <- "Z:/dmclab/Marta/Combined_snRNAseq/final_plots2"
-dir.create(plot_directory, showWarnings = FALSE)
-Gene_ontology<- na.omit(Gene_ontology)
-experiments<- unique(Gene_ontology$Experiment)
-library(ggplot2)
-library(pheatmap)
-install.packages("maditr")
-library(maditr)
-library(tidyr)
-library(EnhancedVolcano)
-library(scales)
-for (clust in cluster) { 
-
-#description<- subset_common$Description 
-#subset_common<-  subset_common %>%
-    #slice_max(n = 10, order_by = as.numeric(Count))
-subset<- subset(Gene_ontology , cluster== clust )
-subset_tot<-  subset %>%
-  group_by(Experiment)%>%
-    slice_max(n = 10, order_by = as.numeric(Count))
-
-
-# Determine the global range of 'Count' values across all experiments
-global_count_range <- range(subset$Count)
-
-# Function to extract the legend
-get_legend <- function(plot) {
-  legend <- cowplot::get_legend(plot)
-  plot <- plot + theme(legend.position = "right")
-  return(list(plot = plot, legend = legend))
-}
-
-# Initialize list to store plots
-plots <- list()
-legend <- NULL
-
-for (i in experiments) {
-  subset_exp <- subset(subset, Experiment == i)
-  subset_exp <- subset_exp %>%
-    slice_max(n = 10, order_by = as.numeric(Count))
-  
-  plot <- ggplot(subset_exp, aes(x = reorder(Description, -log10(p.adjust)), y = -log10(p.adjust), size = Count, color = reg == "downreg")) +
-    geom_point() +
-    scale_size_continuous(limits = global_count_range,range=c(3,6)) +
-    scale_y_continuous(limits=c(0,7.5))+# Ensure consistent size range
-    scale_colour_manual(name = 'Reg', values = setNames(c("#31869bff", "#963634ff"), c(T, F))) +
-    labs(title = paste("Gene ontology on cluster:", clust, i), size = "Number of Genes") +
-    theme_minimal() +
-    theme(
-      axis.text.x = element_text(angle = 45, vjust = 0.5, hjust = 1),
-      axis.text.y = element_text(size = 12),
-      axis.title.y = element_blank()
-    ) +
-    coord_flip()+
-    theme_classic()
-  
-  # Extract legend from the first plot
-  if (is.null(legend)) {
-    extracted <- get_legend(plot)
-    plot <- extracted$plot
-    legend <- extracted$legend
-    plot <- plot + theme(legend.position = "right")
-  } else {
-    plot <- plot + theme(legend.position = "right")
-  }
-  clust <- gsub("/", "_", clust)
-
-  plot_filename <- paste0(plot_directory, "/GO_dotplot_", clust, "_", i, ".pdf")
-  ggsave(plot_filename, plot = plot, width = 10, height = 6)
-  
-  
-  
-
-}
-  
-}
-
- 
-
-
-
-
-```
-
-Cellchat for LR analysis and cel to cell interaction
-```{r}
-BiocManager::install("BiocNeighbors")
-devtools::install_github("jinworks/CellChat")
-
-devtools::install_github("sqjin/CellChat")
-install.packages('NMF')
-devtools::install_github("jokergoo/circlize")
-devtools::install_github("jokergoo/ComplexHeatmap")
-library(CellChat) 
-library(NMF)
-library(circlize)
-library(ComplexHeatmap)
-
-DefaultAssay(rna.combined) <- "RNA" # Ensure the RNA assay is selected
-
-degs <- m1$gene
-rna.combined_degs <- subset(rna.combined, features = degs)
-
-data.input <- rna.combined[["RNA"]]@data # normalized data matrix
-# For Seurat version >= “5.0.0”, get the normalized data via `seurat_object[["RNA"]]$data`
-labels <- Idents(rna.combined)
-meta <- rna.combined@meta.data
-# Create a data frame for the labels
-labels_df <- data.frame(labels = labels, row.names = names(labels))
-# Merge the existing metadata with the labels based on row names (cell names)
-meta<- merge(meta, labels_df, by = "row.names", all.x = TRUE)
-
-# Set the row names back to the original names after merging
-row.names(meta_updated) <- meta_updated$Row.names
-meta_updated$Row.names <- NULL  # Remove the Row.names column if not needed
-
-# Check the updated metadata
-head(meta_updated)
-
-# Create CellChat object from the Seurat object
-cellChat <- createCellChat(object = rna.combined, group.by = "ident", assay = "RNA")
-#or
-cellchat1 <- createCellChat(object = rna.combined, meta = meta, group.by = "labels") # or replace 'ident' with the cell type annotation you have
-cellchat1@meta$samples<- cellchat1@meta$Sample
- # set CellChatDB <- CellChatDB.human if working on the human dataset
-interaction_input <- CellChatDB$interaction
-complex_input <- CellChatDB$complex
-cofactor_input <- CellChatDB$cofactor
-geneInfo <- CellChatDB$geneInfo
-write.csv(interaction_input, file = "interaction_input_CellChatDB.csv")
-write.csv(complex_input, file = "complex_input_CellChatDB.csv")
-write.csv(cofactor_input, file = "cofactor_input_CellChatDB.csv")
-write.csv(geneInfo, file = "geneInfo_input_CellChatDB.csv")
-
-interaction_input <- read.csv(file = 'interaction_input_CellChatDB.csv', row.names = 1)
-complex_input <- read.csv(file = 'complex_input_CellChatDB.csv', row.names = 1)
-cofactor_input <- read.csv(file = 'cofactor_input_CellChatDB.csv', row.names = 1)
-geneInfo <- read.csv(file = ' geneInfo_input_CellChatDB.csv', row.names = 1)
-CellChatDB <- list()
-CellChatDB$interaction <- interaction_input
-CellChatDB$complex <- complex_input
-CellChatDB$cofactor <- cofactor_input
-CellChatDB$geneInfo <- geneInfo
-
-CellChatDB.mouse <- CellChatDB
-usethis::use_data(CellChatDB.mouse, overwrite = TRUE)
-
-# use a subset of CellChatDB for cell-cell communication analysis
-CellChatDB.use <- subsetDB(CellChatDB, search = "Secreted Signaling", key = "annotation") # use Secreted Signaling
-
-# Only uses the Secreted Signaling from CellChatDB v1
-#  CellChatDB.use <- subsetDB(CellChatDB, search = list(c("Secreted Signaling"), c("CellChatDB v1")), key = c("annotation", "version"))
-
-# use all CellChatDB except for "Non-protein Signaling" for cell-cell communication analysis
-# CellChatDB.use <- subsetDB(CellChatDB)
-
-
-# use all CellChatDB for cell-cell communication analysis
-# CellChatDB.use <- CellChatDB # simply use the default CellChatDB. We do not suggest to use it in this way because CellChatDB v2 includes "Non-protein Signaling" (i.e., metabolic and synaptic signaling). 
-
-
-cellchat <- subsetData(cellchat1) # This step is necessary even if using the whole database
-future::plan("multisession", workers = 4) # do parallel
-cellchat <- identifyOverExpressedGenes(cellchat)
-cellchat <- identifyOverExpressedInteractions(cellchat)
-#Compute the communication probability and infer cellular communication network
-cellchat <- computeCommunProb(cellchat, type = "triMean")
-#Users can filter out the cell-cell communication if there are only few cells in certain cell groups. By default, the minimum number of cells required in each cell group for cell-cell communication is 10.
-cellchat <- filterCommunication(cellchat, min.cells = 10)
-
-cellchat <- computeCommunProbPathway(cellchat)
-```

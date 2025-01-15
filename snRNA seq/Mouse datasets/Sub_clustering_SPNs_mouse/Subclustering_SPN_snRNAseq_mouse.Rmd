@@ -1,0 +1,1956 @@
+
+title: "sub clustering striatal clusters"
+author: "Yuvarani Masarapu & Marta Graziano"
+date: '2022-08-24'
+output: html_document
+
+
+
+```{r}
+paramSweep <- function(seu, PCs=1:10, sct = FALSE, num.cores=1) {
+  require(Seurat); require(fields); require(parallel)
+  ## Set pN-pK param sweep ranges
+  pK <- c(0.0005, 0.001, 0.005, seq(0.01,0.3,by=0.01))
+  pN <- seq(0.05,0.3,by=0.05)
+
+  ## Remove pK values with too few cells
+  min.cells <- round(nrow(seu@meta.data)/(1-0.05) - nrow(seu@meta.data))
+  pK.test <- round(pK*min.cells)
+  pK <- pK[which(pK.test >= 1)]
+
+  ## Extract pre-processing parameters from original data analysis workflow
+  orig.commands <- seu@commands
+
+  ## Down-sample cells to 10000 (when applicable) for computational effiency
+  if (nrow(seu@meta.data) > 10000) {
+    real.cells <- rownames(seu@meta.data)[sample(1:nrow(seu@meta.data), 10000, replace=FALSE)]
+    data <- seu@assays$RNA$counts[ , real.cells]
+    n.real.cells <- ncol(data)
+  }
+
+  if (nrow(seu@meta.data) <= 10000){
+    real.cells <- rownames(seu@meta.data)
+    data <- seu@assays$RNA$counts
+    n.real.cells <- ncol(data)
+  }
+
+  ## Iterate through pN, computing pANN vectors at varying pK
+  #no_cores <- detectCores()-1
+  if(num.cores>1){
+    require(parallel)
+    cl <- makeCluster(num.cores)
+    output2 <- mclapply(as.list(1:length(pN)),
+                        FUN = parallel_paramSweep,
+                        n.real.cells,
+                        real.cells,
+                        pK,
+                        pN,
+                        data,
+                        orig.commands,
+                        PCs,
+                        sct,mc.cores=num.cores)
+    stopCluster(cl)
+  }else{
+    output2 <- lapply(as.list(1:length(pN)),
+                      FUN = parallel_paramSweep,
+                      n.real.cells,
+                      real.cells,
+                      pK,
+                      pN,
+                      data,
+                      orig.commands,
+                      PCs,
+                      sct)
+  }
+
+  ## Write parallelized output into list
+  sweep.res.list <- list()
+  list.ind <- 0
+  for(i in 1:length(output2)){
+    for(j in 1:length(output2[[i]])){
+      list.ind <- list.ind + 1
+      sweep.res.list[[list.ind]] <- output2[[i]][[j]]
+    }
+  }
+
+  ## Assign names to list of results
+  name.vec <- NULL
+  for (j in 1:length(pN)) {
+    name.vec <- c(name.vec, paste("pN", pN[j], "pK", pK, sep = "_" ))
+  }
+  names(sweep.res.list) <- name.vec
+  return(sweep.res.list)
+
+}
+run_doublet_finder <- function(x, do_plot = T, header = "") {
+    # Given the number of cells in a library, return the estimated doublet rate. 
+    # Number taken from
+    # https://kb.10xgenomics.com/hc/en-us/articles/360001378811-What-is-the-maximum-number-of-cells-that-can-be-profiled-
+    
+    doublet_rate <- function(n_cells) {
+        if (n_cells < 750) {
+            return(0.004)
+        }
+        if (n_cells < 1500) {
+            return(0.008)
+        }
+        if (n_cells < 2500) {
+            return(0.016)
+        }
+        if (n_cells < 3500) {
+            return(0.024)
+        }
+        if (n_cells < 4500) {
+            return(0.032)
+        }
+        if (n_cells < 5500) {
+            return(0.04)
+        }
+        if (n_cells < 6500) {
+            return(0.048)
+        }
+        if (n_cells < 7500) {
+            return(0.056)
+        }
+        if (n_cells < 8500) {
+            return(0.064)
+        }
+        if (n_cells < 9500) {
+            return(0.072)
+        }
+        if (n_cells < 10500) {
+            return(0.08)
+        }
+
+        # extrapolating 0.01 for each additional 1000 cells.
+        if (n_cells < 11500) {
+            return(0.09)
+        }
+        if (n_cells < 12500) {
+            return(0.1)
+        }
+        if (n_cells < 13500) {
+            return(0.11)
+        }
+        if (n_cells < 13500) {
+            return(0.12)
+        }
+        if (n_cells < 14500) {
+            return(0.13)
+        }
+        if (n_cells < 15500) {
+            return(0.14)
+        }
+        if (n_cells < 16500) {
+            return(0.16)
+        } 
+        else (return(0.17))
+    }
+
+    # Normalize for doublet finder
+    DefaultAssay(x) <- "RNA"
+    x <- NormalizeData(x)
+    x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+    x <- ScaleData(x)
+    x <- RunPCA(x)
+    x <- RunUMAP(x, dims = 1:30)
+
+    # pK Identification (no ground-truth)
+    sweep_list <- paramSweep(x, PCs = 1:10)
+    sweep_stats <- summarizeSweep(sweep_list)
+    bcmvny <- find.pK(sweep_stats)
+    use_pK <- as.numeric(levels(bcmvny$pK)[which(bcmvny$BCmetric == max(bcmvny$BCmetric))])
+
+    # Estimate doublet rate and predict doublets
+    n_cells <- nrow(x@meta.data)
+    nExp_poi <- round(doublet_rate(n_cells) * n_cells)
+    x <- doubletFinder(x, PCs = 1:10, pN = 0.25, pK = use_pK, nExp = nExp_poi)
+
+    DF.name = colnames(x@meta.data)[grepl("DF.classification", colnames(x@meta.data))]
+
+    if (do_plot) {
+        print(DimPlot(x, group.by = DF.name) + ggtitle(header))
+        print(VlnPlot(x, features = "nFeature_RNA", group.by = DF.name, pt.size = 0))
+    }
+
+    out_pred <- x@meta.data[, DF.name]
+    names(out_pred) <- colnames(x)
+    return(x)
+    # return(out_pred)
+}
+```
+
+
+#Let’s check the size of data for each sample
+```{R}
+
+
+seurat_rna <- readRDS(file = "Z:/dmclab/Marta/Combined_snRNAseq/data/raw_combined_snRNAseq.rds")
+seurat_rna$Sample_group <- colnames(seurat_rna)
+
+seurat_rna$Sample_group[seurat_rna$Sample %in% c("15a", "15b", "15c","15d","18a", "18d")] <- "Mitopark15_18"
+seurat_rna$Sample_group[seurat_rna$Sample %in% c("MP1", "MP2", "MP3")] <- "Mitopark_11"
+seurat_rna$Sample_group[seurat_rna$Sample %in% c("C1", "C2", "C3", "C4", "C5", "Control_1", "Control_2" ,"Control_3")] <- "Control"
+seurat_rna$Sample_group[seurat_rna$Sample %in% c("6OHDA_1", "6OHDA_2", "6OHDA_3")] <- "6OHDA"
+
+
+# use table function to get the number of cells in each Sample as a dataframe
+df <- as.data.frame(rev(table(seurat_rna$Sample)))
+colnames(df) <- c('Sample', 'n_cells')
+
+# bar plot of the number of cells in each sample
+p <- ggplot(df, aes(y=n_cells, x=reorder(Sample, Sample), fill=Sample)) +
+  geom_bar(stat='identity') +
+  geom_text(aes(label = n_cells), vjust = 1.5, colour = "black") +
+  scale_y_continuous(expand = c(0,0)) +
+  NoLegend() + RotatedAxis() +
+  ylab(expression(italic(N)[cells])) + xlab('Sample Name') +
+  ggtitle(paste('Total cells:', sum(df$n_cells))) +
+  theme(
+    panel.grid.minor=element_blank(),
+    panel.grid.major.y=element_line(colour="lightgray", size=0.5),
+  )
+
+#png('figures/basic_cells_per_sample.png', width=9, height=4, res=200, units='in')
+quartz()
+p
+```
+
+```{r}
+# Plot most abundant transctipts
+par(mar = c(4, 8, 2, 1))
+C <- seurat_rna@assays$RNA@counts
+C <- Matrix::t(Matrix::t(C)/Matrix::colSums(C)) * 100
+saveRDS(C, file = "C.rds")
+most_expressed <- order(apply(C, 1, median), decreasing = T)[20:1]
+saveRDS(most_expressed, file = "most_expressed.rds")
+# Plot most abundant transctipts
+par(mar = c(4, 8, 2, 1))
+C <- readRDS("C.rds")
+most_expressed <- readRDS("most_expressed.rds")
+boxplot(as.matrix(t(C[most_expressed, ])), cex = 0.1, las = 1, xlab = "% total count per cell", col = (scales::hue_pal())(20)[20:1], horizontal = TRUE)
+
+quartz()
+p
+```
+
+
+```{r}
+#violin plot with raw values
+p1 <- VlnPlot(object = seurat_rna, features = c("nFeature_RNA"), group.by = "Sample",
+    pt.size = 0, log = F)
+
+p2 <- VlnPlot(object = seurat_rna, features = c("nCount_RNA"), group.by = "Sample",
+    pt.size = 0, log = F)
+
+cowplot::plot_grid(plotlist = list(p1,p2), nrow = 1, ncol = 2)
+
+#violin plot with logscaled values
+p1 <- VlnPlot(object = seurat_rna, features = c("nFeature_RNA"), group.by = "Sample",
+    pt.size = 0, log = T)
+
+p2 <- VlnPlot(object = seurat_rna, features = c("nCount_RNA"), group.by = "Sample",
+    pt.size = 0, log = T)
+
+cowplot::plot_grid(plotlist = list(p1,p2), nrow = 1, ncol = 2)
+
+rm(p1,p2)
+```
+
+After filtering
+Overexpressed Malat1 gene,
+mitochondrial and ribosomal genes
+All genes with 0 transcripts detected
+nFeature_RNA > 300 & nFeature_RNA < 10000 & nCount_RNA > 400 &  nCount_RNA < 75000
+Genes per UMI per cell ratio above 0.82 (gives an idea of the complexity of each cell)
+
+```{r}
+#https://bookdown.org/ytliu13207/SingleCellMultiOmicsDataAnalysis/seurat-qc-cell-level-filtering.html
+
+#remove counts variable from previous step
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("biomaRt")
+library(biomaRt)
+
+mart <- useMart(biomart="ensembl", dataset="mmusculus_gene_ensembl")
+Y_Genes <- getBM(attributes = c("chromosome_name",  "mgi_symbol"),
+           filters = "chromosome_name", values = "Y", mart = mart)
+X_Genes <- getBM(attributes = c("chromosome_name",  "mgi_symbol"),
+           filters = "chromosome_name", values = "X", mart = mart)
+
+genes_to_remove <- c("Malat1","Xist", "Uty", "Tsix",'Ddx3y', "Ddx3x", "Tbl1x","Usp9x","Jpx","Ftx","Tsnax","Pcdh11x", 'Eif2s3y',"Eif2s3x","Tmsb4x","Tmsb4y", 'Kdm5d')
+genes_to_remove<- c(genes_to_remove,Y_Genes$hgnc_symbol, X_Genes$hgnc_symbol )
+# Filter out genes from the Seurat object
+seurat_rna <- seurat_rna[!rownames(seurat_rna) %in% genes_to_remove, ]
+#seurat_rna = JoinLayers(seurat_rna)
+# Remove mitochondrial genes, 13 genes filtered out
+seurat_rna[["percent_mt"]] <- PercentageFeatureSet(seurat_rna, pattern = "^mt-")
+seurat_rna <- seurat_rna[!grepl("^mt-", rownames(seurat_rna)), ]
+
+# Remove ribosomal genes, 111 genes filtered out
+seurat_rna <- seurat_rna[!grepl("^Rps|^Rpl", rownames(seurat_rna)), ]
+
+# log10 of number of genes detected per UMI
+seurat_rna$log10GenesPerUMI <- log10(seurat_rna$nFeature_RNA) / log10(seurat_rna$nCount_RNA)
+seurat_rna$orig.ident<- "snRNA seq"
+library(data.table)
+df <- as.data.table(seurat_rna@meta.data)
+sel <- c("orig.ident", "nCount_RNA", "nFeature_RNA", "percent_mt", "log10GenesPerUMI")
+df <- df[, sel, with = FALSE]
+#df[1:3, ]
+library(gridExtra)
+library(dplyr)
+library(purrr)
+
+fontsize <- 10
+linesize <- 0.35
+
+gp.ls <- df[, 2:5] %>% imap( ~ {
+  
+   # define lable fun
+  give.n <- function(x) {
+    return(c(y = median(x) + max(x) / 10, label = round(median(x), 2)))
+  }
+  
+  # assign colors
+  col.ls <-
+    setNames(
+      c('lightpink2', 'lightblue2', 'lightgreen', 'coral1'),
+      c("nCount_RNA", "nFeature_RNA", "percent_mt", "log10GenesPerUMI")
+    )
+  
+  ggplot(data = df, aes(x = orig.ident, y = .x)) +
+    geom_violin(trim = FALSE, fill = col.ls[.y]) +
+    ggtitle(label = .y) + ylab(label = .y) +
+    theme_bw() +
+    theme(
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      strip.background = element_blank(),
+      panel.border = element_blank()
+    ) +
+    theme(
+      axis.text = element_text(size = fontsize),
+      axis.line = element_line(colour = "black", size = linesize),
+      axis.ticks = element_line(size = linesize),
+      axis.title.x = element_blank(),
+      axis.ticks.length = unit(.05, "cm"),
+      plot.title = element_text(size = fontsize + 2, hjust = 0.5),
+      legend.position = 'none'
+    ) +
+    stat_summary(fun = median, geom = "point", col = "black") +  # Add points to plot
+    stat_summary(fun.data = give.n,
+                 geom = "text",
+                 col = "black")
+})
+
+  plot_filename <- paste0("Z:/dmclab/Marta/Combined_snRNAseq/stat_plots/stat_all", ".pdf")
+  pdf(plot_filename, width = 9, height = 9)  # Adjust width and height as desired
+  print( grid.arrange(gp.ls[[1]], gp.ls[[2]], gp.ls[[3]], gp.ls[[4]], ncol = 2))
+  dev.off()
+
+# Add metadata back to Seurat object
+metadata <- seurat_rna@meta.data
+
+# Visualize the number UMIs/transcripts per cell
+metadata %>% 
+  	ggplot(aes(color=Sample, x=nCount_RNA, fill= Sample)) + 
+  	geom_density(alpha = 0.2) + 
+  	scale_x_log10() + 
+  	theme_classic() +
+  	ylab("Cell density") +
+  labs(title="Visualize the number UMIs/transcripts per cell")+
+  	geom_vline(xintercept = c(400, 75000))
+
+# Visualize the number genes per cell
+metadata %>% 
+  	ggplot(aes(color=Sample, x=nFeature_RNA, fill= Sample)) + 
+  	geom_density(alpha = 0.2) + 
+  	scale_x_log10() + 
+  	theme_classic() +
+  	ylab("Cell density") +
+  labs(title=" Visualize the number genes per cell")+
+  	geom_vline(xintercept = c(300, 10000))
+
+# Visualize the number genes per cell
+metadata %>% 
+  	ggplot(aes(color=Sample, x=log10GenesPerUMI, fill= Sample)) + 
+  	geom_density(alpha = 0.2) + 
+  	scale_x_log10() + 
+  	theme_classic() +
+  	ylab("Cell density") +
+  	geom_vline(xintercept = c(0.82))
+```
+
+```{r subsetting, warning=FALSE}
+# subset will do cell-level filtering, remove cells with detected genes less than 350
+seurat_rna <- subset(seurat_rna, subset = nFeature_RNA > 300 & nFeature_RNA < 10000 & nCount_RNA > 400 &  nCount_RNA < 75000)
+
+# complexity of each cell to be > 0.80, so genes detected proportional to UMI
+seurat_rna <- subset(seurat_rna, subset = log10GenesPerUMI > 0.82)
+
+# Always do gene level threshold filtering AFTER cell filtering. 
+# There could be some rows or genes with '0' transcripts that can remain after the cell filtering and if done before, this may lead to some rows in the matrix with all '0' values across.
+# We also want to remove genes with 0 transcripts. Using subset() will not work here
+seurat_rna <- seurat_rna[rowSums(seurat_rna) > 0, ]
+```
+Check data quality after filtering
+```{r}
+p1 <- VlnPlot(object = seurat_rna, features = c("nFeature_RNA"), group.by = "Sample",
+    pt.size = 0, log = F)
+
+p2 <- VlnPlot(object = seurat_rna, features = c("nCount_RNA"), group.by = "Sample",
+    pt.size = 0, log = F)
+quartz()
+cowplot::plot_grid(plotlist = list(p1,p2), nrow = 1, ncol = 2)
+#y axis with log scale
+
+p1 <- VlnPlot(object = seurat_rna, features = c("nFeature_RNA"), group.by = "Sample",
+    pt.size = 0, log = T)
+
+p2 <- VlnPlot(object = seurat_rna, features = c("nCount_RNA"), group.by = "Sample",
+    pt.size = 0, log = T)
+
+cowplot::plot_grid(plotlist = list(p1,p2), nrow = 1, ncol = 2)
+
+#Percentage mitchondria per nuclei-Removed all mt- genes but let’s see how they were distributed across each cell/nuclei
+
+VlnPlot(object = seurat_rna, features = c("percent_mt"), group.by = "Sample",
+    pt.size = 0, log = T)
+
+```
+
+```{r}
+data.filt <- SplitObject(seurat_rna, split.by = "Sample")
+
+
+#Main clusters object
+data.object.filter.norm.integrated <- readRDS("Z:/dmclab/Marta/Combined_snRNAseq/data/rna.combined.snRNA_seq_merged_42_res0.4_annotated.rds")
+
+#check you opened the correct object
+p<-DimPlot(object = data.object.filter.norm.integrated, group.by = "seurat_clusters", reduction = "umap_after_harmony_3", pt.size = 0.6, label = T, label.size = 6) + ggtitle("Clusters in combined snRNAseq dataset")
+```
+
+We have sample numbers added at the end of each spot id with an '_' in the main clusters object.
+But for the original raw object list, this is not the case, hence we need to first check if the order of the samples is the same for both objects.
+
+```{r}
+for(id in 1:length(data.filt)){
+  print(unique(data.filt[[id]]$Sample))
+}
+```
+
+```{r}
+unique(data.object.filter.norm.integrated$Sample)
+```
+
+If yes, then we go ahead and merge the filtered object list, add sample numbers to each spot id. This way, the spot ids will match and we will be able to filter the spots we want to keep for the striatal sub-clustering.
+
+```{r}
+#Here, seurat will automatically add sample numbers suffixed to each spot id to make sure they are unique.
+temp <- merge(data.filt[[1]], y = data.filt[2:length(data.filt)], project = "parkinsons")
+
+#sanity check to make sure that the sample order is the same as in striatal_clus object
+unique(temp$Sample)
+
+#sanity check to make sure that the spot ids follow the same pattern as in the striatal_clus object i.e <spot_id>_<sample_no.>
+head(colnames(temp))
+```
+
+We filter the merged object to keep only the spots from striatal clusters for the sub-clustering.
+
+```{r}
+cells.keep <- colnames(data.object.filter.norm.integrated)[data.object.filter.norm.integrated@active.ident %in% c("Striatum D1", "Striatum D2", "eSPN")]
+
+head(cells.keep)
+```
+
+```{r}
+temp <- temp[ ,colnames(temp) %in% cells.keep]
+
+#double check as a sanity check
+unique(colnames(temp) == cells.keep)
+length(colnames(temp)) == length(cells.keep)
+```
+
+Now we unlist the object again inorder to perform SCTransform by sample. Then do downstream analysis as we would normally run.
+
+```{r}
+data.filt <- SplitObject(object = temp, split.by = "Sample")
+
+#change list names from sample ids to numbers
+print(names(data.filt) <- c(1:20))
+
+saveRDS(data.filt, file = "Z:/dmclab/Marta/Combined_snRNAseq/data/parkinsons_brain_sub-clusters_filt_allen_ann.rds")
+```
+
+Check again if the sample order matches the data.object.filter.norm.integrated object
+
+```{r}
+for(id in 1:length(data.filt)){
+  print(unique(data.filt[[id]]$Sample))
+  head(colnames(data.filt[[1]]))
+}
+
+#Here the correct sample numbers should show as suffixes to spot ids
+for(id in 1:length(data.filt)){
+  print(head(colnames(data.filt[[id]])))
+}
+
+```
+
+
+
+```{r}
+#seurat_rna_list <- SplitObject(data.filt, split.by = "Sample")
+
+#names(seurat_rna_list)
+set.seed(1)
+
+all_doublets <- NULL
+all_doublet_scores <- NULL
+pANN_max <- 1
+
+for (x_name in names(data.filt)){
+  
+    x <- data.filt[[x_name]]
+
+    VlnPlot(x, features = c("nFeature_RNA", "nCount_RNA", "percent_mt"), ncol = 3,
+        log = T, pt.size = 0) + NoLegend()
+    
+    x <- run_doublet_finder(x, do_plot = T, header = x_name)
+    doublet_cutoff <- 0.6
+    pANN.name = colnames(x@meta.data)[grepl("pANN", colnames(x@meta.data))]
+    DF.name = colnames(x@meta.data)[grepl("DF", colnames(x@meta.data))]
+    new_doublet_scores <- x[[pANN.name]][, 1]
+    names(new_doublet_scores) <- rownames(x[[pANN.name]])
+    new_doublet_calls <- x[[DF.name]][, 1]
+    names(new_doublet_calls) <- rownames(x[[DF.name]])
+    
+    #final cells which are labelled doublets
+    new_doublets <- union(names(which(new_doublet_calls == "Doublet")), names(which(new_doublet_scores >=
+        pANN_max)))
+    x <- x[, setdiff(colnames(x), new_doublets)]
+    all_doublets <- union(all_doublets, new_doublets)
+    all_doublet_scores <- c(all_doublet_scores, new_doublet_scores)
+    
+    #filtering step again to remove rows with '0' transcripts
+    x <- x[rowSums(x) > 0, ]
+    
+    # adding vst.flavour = "v2" makes values 0 across rows for some genes.
+    x <- SCTransform(x, verbose = T, variable.features.n = 4000)
+
+    data.filt[[x_name]] <- x
+}
+
+rm(x)
+
+for(i in 1:length(data.filt)){
+  data.filt[[i]] <- AddMetaData(
+  object = data.filt[[i]] ,
+  metadata = all_doublet_scores[colnames(data.filt[[i]])],
+  col.name = "pANN"
+)
+}
+
+
+
+
+```
+
+Downstream processing
+
+```{r eval=FALSE}
+# select features that are repeatedly variable across datasets for integration
+
+#CHECK DIFFERENT nfEATURES AND CHECK WHEN IT STOPS AND THEN TAKE THE TOP 50% VARIABLE GENES OR WHATEVER PERCENTAGE YOU WANT:
+#Max variable features foud: 9242
+features <- SelectIntegrationFeatures(object.list = data.filt, nfeatures = 6000)
+
+saveRDS(features, file = "Z:/dmclab/Marta/Combined_snRNAseq/data/features_used_allen_ann.rds")
+data.filt <- PrepSCTIntegration(object.list = data.filt, anchor.features = features)
+
+max_ncol <- 0
+max_seurat <- NULL
+for (i in seq_along(data.filt)) {
+    seurat_rna <- data.filt[[i]]  # Get the Seurat object at index i
+    
+    # Get the number of columns for the current Seurat object
+    current_ncol <- ncol(seurat_rna)
+    
+    # Check if the number of columns for the current Seurat object is greater than the maximum number of columns encountered so far
+    if (current_ncol > max_ncol) {
+        # Update the maximum number of columns and the corresponding Seurat object
+        max_ncol <- current_ncol
+        max_seurat <- seurat_rna
+        max_index <- i  # Store the index of the maximum Seurat object
+    }
+}
+#use the max index in the function
+rna.anchors <- FindIntegrationAnchors(object.list = data.filt, anchor.features = features, reference=max_index)
+saveRDS(rna.anchors, file = "Z:/dmclab/Marta/Combined_snRNAseq/data/rna.anchors_subclustering_allen_ann.rds")
+rna.combined_sub <- IntegrateData(anchorset = rna.anchors)
+rna.combined_sub <- RunPCA(object = rna.combined_sub , assay = "SCT", features = features, npcs = 50, verbose = FALSE, reduction.name = "pca_before_harmony", seed.use = 17)
+saveRDS(rna.combined_sub, file = "Z:/dmclab/Marta/Combined_snRNAseq/data/rna.combined_subclustering_allen_ann.rds")
+#rna.combined <- readRDS(file = "rna.combined.clusters.rds")
+e<-ElbowPlot(object = rna.combined_sub, ndims = 50, reduction = "pca_before_harmony") + ggtitle("Elbow plot to select significant PCs")
+
+rna.combined_sub$Sample_group <- colnames(rna.combined_sub)
+
+rna.combined_sub$Sample_group[rna.combined_sub$Sample %in% c("15a", "15b", "15c","15d","18a", "18d")] <- "Mitopark15_18"
+rna.combined_sub$Sample_group[rna.combined_sub$Sample %in% c("MP1", "MP2", "MP3")] <- "Mitopark_11"
+rna.combined_sub$Sample_group[rna.combined_sub$Sample %in% c("C1", "C2", "C3", "C4", "C5", "Control_1", "Control_2" ,"Control_3")] <- "Control"
+rna.combined_sub$Sample_group[rna.combined_sub$Sample %in% c("6OHDA_1", "6OHDA_2", "6OHDA_3")] <- "6OHDA"
+
+
+```
+
+```{r}
+
+plot_directory<- "Z:/dmclab/Marta/Combined_snRNAseq/subclustering/new_allen_analysis"
+
+dir.create(plot_directory)
+
+
+rna.combined_sub <- RunUMAP(object = rna.combined_sub, dims = 1:41, assay = "SCT", seed.use = 63, reduction = "pca_before_harmony", reduction.name = "umap_before_harmony") #36 contributing PCs chosen for further analysis
+
+p1 <- DimPlot(object = rna.combined_sub, group.by = "Sample", reduction = "umap_before_harmony") + ggtitle("Before batch correction (spots grouped by sample)")
+
+p2 <- DimPlot(object = rna.combined_sub, group.by = "Sample_group", reduction = "umap_before_harmony")  + ggtitle("sample groups")
+
+p3 <- FeaturePlot(object = rna.combined_sub, features = "nCount_SCT", reduction = "umap_before_harmony")
+p4 <- FeaturePlot(object = rna.combined_sub, features = "nCount_RNA", reduction = "umap_before_harmony")
+
+(p1 - p2) / (p3 - p4)
+
+
+p <- DimPlot(object = rna.combined_sub, 
+               group.by="Sample_group",
+              pt.size = 1, 
+              reduction = "umap_before_harmony", 
+              raster = FALSE) + 
+  ggtitle("Sample groups") +
+  scale_color_manual(values = c("#ffd694ff", "gray", "#c8e1d9ff", "#9dd8c4ff"))
+plot_filename <- paste0(plot_directory, "/umap_before_harmony_cols_check", ".pdf")
+  #png(plot_filename, width = 600, height = 600) 
+ pdf(plot_filename, width = 8, height = 6)  # Adjust width and height as desired
+ print(p)
+ dev.off()
+
+
+
+#batch correction
+library(harmony)
+set.seed(57)
+
+rna.combined_sub <- RunHarmony(object = rna.combined_sub, group.by.vars = c("Sample"), theta = c(1), assay.use = "SCT", reduction = "pca_before_harmony", dims.use = 1:41, plot_convergence = T, verbose = F, reduction.save = "harmony_sid_1")
+
+rna.combined_sub <- RunUMAP(object = rna.combined_sub, assay.use = "SCT", reduction = "harmony_sid_1", dims = 1:41, seed.use = 6129, reduction.name = "umap_after_harmony")
+
+set.seed(57)
+rna.combined_sub <- RunHarmony(object = rna.combined_sub, group.by.vars = c("Sample_group"), theta = c(1), assay.use = "SCT", reduction = "pca_before_harmony", dims.use = 1:42, plot_convergence = T, verbose = F, reduction.save = "harmony_sid_2")
+
+rna.combined_sub <- RunUMAP(object = rna.combined_sub, assay.use = "SCT", reduction = "harmony_sid_2", dims = 1:41, seed.use = 6129, reduction.name = "umap_after_harmony_2")
+
+set.seed(57)
+rna.combined_sub <- RunHarmony(object = rna.combined_sub, group.by.vars = c("Sample","Sample_group"), theta = c(1,1), assay.use = "SCT", reduction = "pca_before_harmony", dims.use = 1:42, plot_convergence = T, verbose = F, reduction.save = "harmony_sid_3")
+
+rna.combined_sub <- RunUMAP(object = rna.combined_sub, assay.use = "SCT", reduction = "harmony_sid_3", dims = 1:41, seed.use = 6129, reduction.name = "umap_after_harmony_3")
+
+
+
+```
+
+```{r after_batcheffects, fig.width=16, fig.height=14, fig.show='hold'}
+p1 <- DimPlot(object = rna.combined_sub, group.by = "Sample", reduction = "umap_after_harmony") + ggtitle("After batch correction (spots grouped by sample)")
+
+p2 <- DimPlot(object = rna.combined_sub, group.by = "Sample_group", reduction = "umap_after_harmony", cols=c("#ffd694ff", "gray", "#c8e1d9ff", "#9dd8c4ff"))  + ggtitle("sample groups")
+p3 <- FeaturePlot(object = rna.combined_sub, features = "nCount_SCT", reduction = "umap_after_harmony")
+p4 <- FeaturePlot(object = rna.combined_sub, features = "nCount_RNA", reduction = "umap_after_harmony")
+
+
+plot_filename <- paste0(plot_directory, "/umap_after_harmony_sample", ".pdf")
+  #png(plot_filename, width = 600, height = 600) 
+ pdf(plot_filename, width = 8, height = 6)  # Adjust width and height as desired
+ print((p1 - p2) / (p3 - p4))
+ dev.off()
+
+```
+
+```{r after_batcheffects, fig.width=16, fig.height=14, fig.show='hold'}
+p1 <- DimPlot(object = rna.combined_sub, group.by = "Sample", reduction = "umap_after_harmony_2") + ggtitle("After batch correction (spots grouped by sample group)")
+
+p2 <- DimPlot(object = rna.combined_sub, group.by = "Sample_group", reduction = "umap_after_harmony_2",  cols=c("#ffd694ff", "gray", "#c8e1d9ff", "#9dd8c4ff"))  + ggtitle("sample groups")
+
+p3 <- FeaturePlot(object = rna.combined_sub, features = "nCount_SCT", reduction = "umap_after_harmony_2")
+p4 <- FeaturePlot(object = rna.combined_sub, features = "nCount_RNA", reduction = "umap_after_harmony_2")
+
+plot_filename <- paste0(plot_directory, "/umap_after_harmony_sample_group", ".pdf")
+  #png(plot_filename, width = 600, height = 600) 
+ pdf(plot_filename, width = 8, height = 6)  # Adjust width and height as desired
+ print((p1 - p2) / (p3 - p4))
+ dev.off()
+
+```
+
+```{r after_batcheffects, fig.width=16, fig.height=14, fig.show='hold'}
+p1 <- DimPlot(object = rna.combined_sub, group.by = "Sample", reduction = "umap_after_harmony_3") + ggtitle("After batch correction (spots grouped by sample and sample group)")
+
+p2 <- DimPlot(object = rna.combined_sub,group.by = "Sample_group", reduction = "umap_after_harmony_3",  cols=c("#ffd694ff", "gray", "#c8e1d9ff", "#9dd8c4ff"))  + ggtitle("sample groups")
+
+p3 <- FeaturePlot(object = rna.combined_sub, features = "nCount_SCT", reduction = "umap_after_harmony_3")
+p4 <- FeaturePlot(object = rna.combined_sub, features = "nCount_RNA", reduction = "umap_after_harmony_3")
+
+plot_filename <- paste0(plot_directory, "/umap_after_harmony_sampleand_sample_group", ".pdf")
+  #png(plot_filename, width = 600, height = 600) 
+ pdf(plot_filename, width = 8, height = 6)  # Adjust width and height as desired
+ print((p1 - p2) / (p3 - p4))
+ dev.off()
+```
+
+```{r}
+set.seed(61)
+rna.combined_sub <- FindNeighbors(object = rna.combined_sub, assay = "SCT", dims = 1:41, k.param = 23, graph.name = "graph_afterHarmony", reduction = "harmony_sid_3")
+
+rna.combined_sub <- FindClusters(object = rna.combined_sub, pc.use = 1:41, resolution = 1.5, save.SNN = T, do.sparse = T, graph.name = "graph_afterHarmony", random.seed = 13, group.singletons = TRUE)
+
+# Save the clustering results beofre rerunning FIndCluster() with new resolution
+rna.combined_sub$clusters_res_1 <- rna.combined_sub$seurat_clusters
+
+wnn_markers <- FindAllMarkers(rna.combined_sub, only.pos = TRUE, min.pct = 0.05, logfc.threshold = 0.25, recorrect_umi = FALSE)
+wnn_markers <- wnn_markers[wnn_markers$p_val_adj < 0.01, ]
+write.csv(wnn_markers, file = paste0(plot_directory,"/cluster_markers-combined_snRNA_subclustering_annotated_allen_ann_res1.5.csv"), col.names = TRUE, row.names = TRUE)
+
+saveRDS(rna.combined_sub, file = paste0(plot_directory,"/rna.combined.subclusters.res05.pc41_allen_ann.rds"))
+
+# Determine the number of clusters
+n_clusters <- length(unique(rna.combined_sub$seurat_clusters))
+
+# Get the "Paired" palette from RColorBrewer
+palette <- brewer.pal(n = min(n_clusters, 12), name = "Paired")  # Adjust for max palette size
+
+# Extend the palette if more than 12 clusters (optional)
+if (n_clusters > 12) {
+  palette <- colorRampPalette(brewer.pal(12, "Paired"))(n_clusters)
+}
+
+# Apply the palette to DimPlot
+p <- DimPlot(object = rna.combined_sub, group.by = "seurat_clusters", reduction = "umap_after_harmony_3", pt.size = 0.6,label = TRUE, label.size = 2) +  scale_color_manual(values = palette)
+plot_filename <- paste0(plot_directory, "/umap_clusters41pc_res15", ".pdf")
+  #png(plot_filename, width = 600, height = 600) 
+ pdf(plot_filename, width = 8, height = 6)  # Adjust width and height as desired
+ print(p)
+ dev.off()
+#Nuclei counts per cluster
+
+my_table<- as.data.frame(table("cluster" = rna.combined_sub@active.ident, rna.combined_sub@meta.data$orig.ident))
+
+
+table_plot <- ggplot(my_table, aes(x = cluster, y = Freq, fill = cluster)) +
+  geom_col() +
+  geom_text(aes(label = cluster), vjust = -0.5) +
+  #xlim(0,3000)
+  labs(x = "counts", y = "Cluster") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.grid = element_blank()) 
+  # scale_fill_manual(values = cl.colors) # Set the fill colors to match the cluster colors
+
+
+
+plot_filename <- paste0(plot_directory, "/umap_clusters41pc_res05_withtable", ".pdf")
+  #png(plot_filename, width = 600, height = 600) 
+ pdf(plot_filename, width = 8, height = 6)  # Adjust width and height as desired
+ print(grid.arrange(p, table_plot, ncol = 2, widths = c(0.8, 0.2)))
+ dev.off()
+
+
+#allen brain atlan annotation
+  
+  
+# Filter by significance (adjust based on your data)
+filtered_markers <- wnn_markers[wnn_markers$p_val_adj < 0.001 & wnn_markers$avg_log2FC > 0.25, ]
+marker_genes <- unique(filtered_markers$gene)
+
+library(biomaRt)
+
+# Connect to the Ensembl database for mouse
+ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+# Map common gene names (MGI symbols) to Ensembl IDs
+mapping <- getBM(
+  filters = "mgi_symbol",
+  attributes = c("mgi_symbol", "ensembl_gene_id"),
+  values = marker_genes,
+  mart = ensembl
+)
+
+# View the mapping results
+head(mapping)
+
+# Inspect features of the Seurat object
+head(rownames(rna.combined_sub))
+
+# Find common genes between Seurat features and your mapping
+common_genes <- intersect(rownames(rna.combined_sub), mapping$mgi_symbol)
+length(common_genes)  # Check how many genes overlap
+
+# Subset the Seurat object based on common genes
+seurat.obj <- subset(rna.combined_sub, features = common_genes)
+
+
+
+# Extract the normalized gene expression matrix (RNA assay)
+expression_matrix <- GetAssayData(seurat.obj, assay = "RNA", slot = "data")
+# Save the expression matrix
+write.csv(as.matrix(expression_matrix), "Z:/dmclab/Marta/Combined_snRNAseq/subclustering/expression_matrix.csv", row.names = TRUE)
+#generate .h5ad file on python with a custom script (see .py scrpt)
+
+#load results 
+
+# Step 1: Load the MapMyCells results
+mapmycells_results <- read.csv("Z:/dmclab/Marta/Combined_snRNAseq/subclustering/new_allen_analysis/new_adata_for_MapMyCells_.csv", row.names = 1)
+
+# Step 2: Check alignment of cell names
+# Inspect Seurat object cell names
+head(colnames(rna.combined_sub))
+
+# Inspect MapMyCells result cell names
+head(rownames(mapmycells_results))
+
+# Ensure alignment
+if (!all(rownames(mapmycells_results) %in% colnames(rna.combined_sub))) {
+  stop("Cell names in MapMyCells results do not match Seurat object cell names.")
+}
+
+# Step 3: Merge MapMyCells annotations into Seurat metadata
+rna.combined_sub <- AddMetaData(
+  object = rna.combined_sub,
+  metadata = mapmycells_results
+)
+
+
+
+# Access the metadata
+metadata <- rna.combined_sub@meta.data
+
+# Remove the first 4 digits followed by a space and the trailing "_<number>"
+metadata$cluster_name2 <- gsub("^[0-9]{4} |_[0-9]+$", "", metadata$cluster_name)
+# Save the updated metadata back into the Seurat object
+rna.combined_sub@meta.data <- metadata
+
+# Inspect the updated metadata
+head(rna.combined_sub@meta.data)
+
+library(RColorBrewer)
+
+# Determine the number of clusters
+n_clusters <- length(unique(rna.combined_sub$cluster_name))
+
+# Get the "Paired" palette from RColorBrewer
+palette <- brewer.pal(n = min(n_clusters, 12), name = "Paired")  # Adjust for max palette size
+
+# Extend the palette if more than 12 clusters (optional)
+if (n_clusters > 12) {
+  palette <- colorRampPalette(brewer.pal(12, "Paired"))(n_clusters)
+}
+
+# Apply the palette to DimPlot
+p <- DimPlot(
+  object = rna.combined_sub,
+  group.by = "cluster_name",
+  reduction = "umap_after_harmony_3",
+  pt.size = 0.6,
+  label = TRUE,
+  label.size = 2
+) + 
+  scale_color_manual(values = palette)
+
+
+
+
+p <-  DimPlot(
+  object = rna.combined_sub,
+  group.by = "cluster_name",
+  reduction = "umap_after_harmony_3",
+  pt.size = 0.6,
+  label = TRUE,
+  label.size = 2
+) 
+  ggtitle("Clusters in combined snRNAseq dataset") +
+  theme(legend.position = "none")       # Adjust legend key size
+  
+# Full plot with legend
+p<- DimPlot(
+  object = rna.combined_sub,
+  group.by = "class_name",
+  reduction = "umap_after_harmony_3",
+  pt.size = 0.6
+)
+
+# Extract the legend
+legend_plot <- cowplot::get_legend(full_plot + theme(legend.position = "right"))
+
+plot_filename <- paste0(plot_directory, "/UMAP_ANNOTATED_pc42_res0.4_SIZED_allen_class_pairedpal", ".pdf")
+  #png(plot_filename, width = 1800, height = 600) 
+  pdf(plot_filename, width = 32, height = 16)  # Adjust width and height as desired
+  print(p)
+  dev.off()
+
+```
+
+Plots
+Top 5 markers for each cluster
+Genes included only if they are expressed in atleast 25% of cells, hence not testing infrequently expressed genes.
+adjusted p-value threshold used here is 0.05
+genes ordered also by average log FC values
+```{r}
+DefaultAssay(rna.combined_sub)<- "SCT"
+df_filtered <- wnn_markers[!grepl("^Gm|Rik$", wnn_markers$gene), ]
+top5_2<-df_filtered %>%   
+    group_by(cluster) %>%
+    slice_max(n =10, order_by = avg_log2FC) %>%
+    print(n = 1000)
+d3<-DotPlot(rna.combined_sub, features =unique(top5_2$gene)) +
+  scale_colour_gradientn(colours =rev(c("white","gray", "#B34B50", "#5F070C","#240705") )%>% rev()) + labs(y = "cluster")+
+   theme(axis.text.x = element_text(angle = 90, vjust = 0.8, hjust=-0.3))+
+  scale_x_discrete(position = "bottom") +
+  #scale_y_discrete(limits = rev(custom_order)) +
+  theme(axis.text = element_text(family = "sans", size = 7),
+        axis.title = element_text(family = "sans", size = 9),
+        legend.key.size = unit(5, units = "mm"),
+        legend.text = element_text(family = "sans", size = 7),
+        legend.title = element_text(family = "sans", size = 9))+
+ scale_size(range = c(1,8))+
+  coord_flip()
+plot_filename <- paste0(plot_directory, "/top_markers_annotated_15", ".pdf")
+pdf(plot_filename, width = 6, height = 15)  # Adjust width and height as desired
+print(d3)
+dev.off()
+
+
+
+
+rna.combined <- readRDS("Z:/dmclab/Marta/Combined_snRNAseq/data/rna.combined.subclusters_res1.5_annotated_allen_1122.rds")
+rna.combined_sub_full<- rna.combined_sub
+rna.combined_sub <- subset(x = rna.combined, idents = setdiff(unique(Idents(rna.combined)), "Splatter"))
+
+#delete old annotation
+Idents(rna.combined_sub) <- rna.combined_sub@meta.data$seurat_clusters
+
+new.cluster.ids<- c("D2 mtx DMS","D2 mtx DMS", "D1 mtx DMS","D1 Patch","D1 STR-Pal Chst9+","D2 Patch","D1 mtx DMS","eSPN", "Splatter","D1 mtx DMS", "D1 mtx DLS","D2 mtx DLS", "D1 NAc" ,"ICj D3","D1 NAc","D2 NAc", "D2 mtx DMS", "D2 Patch Htr7+","sAMY", "Splatter","Splatter","Splatter","Splatter","Splatter")
+names(new.cluster.ids) <- levels(rna.combined_sub)
+rna.combined_sub <- RenameIdents(rna.combined_sub, new.cluster.ids)
+rna.combined_sub$clusters <- Idents(rna.combined_sub)
+saveRDS(rna.combined_sub_all, file="Z:/dmclab/Marta/Combined_snRNAseq/data/rna.combined.subclusters_res1.5_annotated_allen_1122.rds")
+
+
+
+DefaultAssay(rna.combined) <- "SCT"
+
+
+
+cl.colors <-  c("#B95F89","#0a4347ff","#7fddc4ff","#fab9d7","#379da6ff", "#878787", "#856fa7ff","#ae4e73ff")
+cl.colors<- c("#e080b9","#4e6e63","#b6dddb","#a2cae9", "#f3c9d9","#bc7ed4","#878787","#0a4347ff","#d04177","#6c9b9c","#f78954","#a26074","#f69e92","#4b053c")
+
+
+cl.colors2 <-  c("#0a4347ff","#878787","#878787","#7fddc4ff","#878787","#878787", "#878787")
+
+#pie(rep(1,length(cl.colors)), col = cl.colors)
+
+# Determine the number of clusters
+n_clusters <- length(unique(rna.combined_sub$clusters))
+
+# Get the "Paired" palette from RColorBrewer
+palette <- brewer.pal(n = min(n_clusters, 12), name = "Paired")  # Adjust for max palette size
+
+# Extend the palette if more than 12 clusters (optional)
+if (n_clusters > 12) {
+  palette <- colorRampPalette(brewer.pal(12, "Paired"))(n_clusters)
+}
+
+
+p<-DimPlot(object = rna.combined, reduction = "umap_after_harmony_3", pt.size = 0.8, label = F,cols=alpha(cl.colors,0.5) ,label.size = 4) + ggtitle("Subclustering clusters for mouse snRNAseq dataset")+ theme_classic()
+plot_filename <- paste0(plot_directory, "/UMAP_ANNOTATED_pc41_res0.4_cols_allen_annotated_label_col", ".pdf")
+  #png(plot_filename, width = 1800, height = 600) 
+  pdf(plot_filename, width = 10, height = 8)  # Adjust width and height as desired
+  print(p)
+  dev.off()
+  
+
+  
+  
+library(dplyr)
+wnn_markers_ann <- FindAllMarkers(rna.combined_sub, only.pos = TRUE, min.pct = 0.05, logfc.threshold = 0.25, recorrect_umi = FALSE)
+wnn_markers_ann <- wnn_markers_ann[wnn_markers_ann$p_val_adj < 0.01, ]
+write.csv(wnn_markers_ann, file = "Z:/dmclab/Marta/Combined_snRNAseq/subclustering/new_allen_analysis/cluster_markers-combined_snRNA_subclustering_annotated_allen_ann_res1.5.csv", col.names = TRUE, row.names = TRUE)
+wnn_markers_ann<- read.csv("Z:/dmclab/Marta/Combined_snRNAseq/subclustering/new_allen_analysis/cluster_markers-combined_snRNA_subclustering_annotated_allen_ann_res1.5.csv")
+df_filtered <- wnn_markers_ann[!grepl("^Gm|Rik$", wnn_markers_ann$gene), ]
+top5_2 <- df_filtered %>%
+  group_by(cluster) %>%
+  slice_max(n = 5, order_by = avg_log2FC) %>%
+  filter(row_number() %in% 1:5)
+
+
+
+
+#specific markers 
+markers1<- c("Drd1","Drd2","Adora2a","Tac1","Id4","Epha4","Kremen1","Sema5b","Lypd1","Oprm1","Htr7","Col11a1","Otof","Pcdh8")
+markers<-c("Ppp1r1b", "Slc32a1","Gpr6","Gpr88","Adora2a","Drd1","Penk","Pdyn","Tac1","Lypd1","Chst9","Htr7","Oprm1","Pthlh","Sst","Npy","Sema5b","Drd3","Rxfp1", "Col11a1", "Pcdh8","Otof","Cpne4", "Grik1","Cacng5","Cnr1","Neto1","Sorcs2","Ptprt","Rab276","Gabra5","Zdbf2","Ap2b1","Ahsa2","Syt10","Cntn3","Nnat","Mgll","Crym","Gpr155", "Dlk1")
+markers<-c("Ppp1r1b","Adora2a","Penk","Drd1","Pdyn","Tac1","Chst9","Htr7","Oprm1","Sema5b","Pthlh","Drd3","Col11a1", "Pcdh8","Otof","Cpne4", "Grik1","Neto1","Gabra5","Syt10","Nnat","Mgll","Crym","Gpr155", "Dlk1")
+d1_markers<- c("Gpr149", "Fam155a", "Syt6", "Neto2", "Rgs20", "Homer1", "Kcnj3", "Drd3", "Kremen1", "Egr1", "Lrrk2", "Tshz1", "Nr4a1")
+st_markers<- c("Calb1","Cck","Ptgds","Enpp2", "Lars2","Cldn11","Arc", "Egr1","Avp","Col11a1","Tac1","Rgs2","Bc1","Pde7b","Otof","Nts")
+cost_order<- c("D2 mtx DMS","D2 mtx DLS","D2 Patch", "D2 Patch Htr7+","D2 NAc", "D1 mtx DMS", "D1 mtx DLS", "D1 Patch" ,"D1 STR-Pal Chst9+",  "eSPN",  "D1 NAc","ICj D3",   "sAMY")
+d3<-DotPlot(rna.combined_sub, features =markers) +
+  scale_colour_gradientn(colours =rev(c("white","gray", "#B34B50", "#5F070C","#240705") )%>% rev()) + labs(y = "cluster")+
+   theme(axis.text.x = element_text(angle = 90, vjust = 0.8, hjust=-0.3))+
+  scale_x_discrete(position = "bottom") +
+  scale_y_discrete(limits = rev(cost_order))+
+  theme(axis.text = element_text(family = "sans", size = 7),
+        axis.title = element_text(family = "sans", size = 10),
+        legend.key.size = unit(5, units = "mm"),
+        legend.text = element_text(family = "sans", size = 7),
+        legend.title = element_text(family = "sans", size = 10))+
+ scale_size(range = c(1,8))
+plot_filename <- paste0(plot_directory, "/selected_markers_annotated", ".pdf")
+  #png(plot_filename, width = 600, height = 600) 
+pdf(plot_filename,width=10, height = 5) # Adjust width and height as desired
+print(d3)
+dev.off()
+
+
+lapply(unique(mrk), function(gene){
+  tryCatch({
+    myplot <- FeaturePlot(rna.combined_sub, features = gene, reduction = "umap_after_harmony_3", slot = "data", pt.size=0.6,
+                          label=FALSE, raster=FALSE) & 
+                          theme(legend.position = "right") &
+                          #scale_color_gradientn(colors = c("gray","#60795bff", "#354332ff"), limits=c(0,3))
+                          scale_color_gradientn(colors = c("gray","#B34B50", "#5F070C","#240705"),limits=c(0,5))
+      
+
+    plot_filename <- paste0(plot_directory, "/marker_umap_HD_norm_fig_lim_", gene, ".pdf")
+    pdf(plot_filename, width = 8, height = 6)  # Adjust width and height as desired
+    print(myplot)
+    dev.off()
+  }, error = function(e) {
+    message(paste("Error with gene:", gene, " - Skipping to next..."))
+    # Continue with the next gene if there's an error
+  })
+
+})
+
+
+rna.combined_sub@meta.data$orig.ident <- "snRNA seq experiments"
+table<- table("cluster" = rna.combined_sub@active.ident, rna.combined_sub@meta.data$orig.ident)
+table<- as.data.frame(table)
+write.csv(table, file="Z:/dmclab/Marta/Combined_snRNAseq/subclustering/new_allen_analysis/Nuclei_per_cluster_merged.csv")
+
+# Calculate percentages
+Percentage <- (table$Freq / sum(table$Freq)) * 100
+table1<- cbind(table[1],table[3],table[4],Percentage)
+
+Sample_groups<- unique(table$Var3)
+table_final<- data.frame()
+for (i in Sample_groups){
+  table_group<- subset(table, Var3== i)
+  Percentage <- (table_group$Freq / sum(table_group$Freq)) * 100
+  table1<- cbind(table_group[1],table_group[3],table_group[4],Percentage, cl.colors)
+  table_final<- rbind(table1, table_final)
+
+}
+
+# Violins for clusters
+p <- VlnPlot(object = rna.combined_sub, features = "nFeature_RNA",  pt.size = 0, assay = "RNA", cols= cl.colors) +ylim(0,10000)
+ggsave(p, filename = "Z:/dmclab/Marta/Combined_snRNAseq/subclustering/new_allen_analysis/violins_nGene_cluster.pdf", dpi = 300, width = 10, height = 5)
+
+p2 <- p - p1
+
+p2
+
+ggsave(p2, filename = paste(indir, "/stats/stats_perSpot_unnormalised_groupby_Clusters.pdf", sep = ""), dpi = 300, width = 20, height = 6)
+
+
+lapply(unique(markers), function(gene){
+                          
+   myplot <- VlnPlot(object = rna.combined, features = gene, pt.size = 0,log=F,  cols = cl.colors)
+
+  plot_filename <- paste0(plot_directory, "/violin_axis", gene, ".pdf")
+  pdf(plot_filename, width = 8, height = 6)  # Adjust width and height as desired
+  print(myplot)
+  dev.off()
+})
+colnames(table_final)<- c("cluster","Sample_group", "Freq", "Percentage", "color")
+
+p<-ggplot(table_final, aes(x = Sample_group, y = Percentage, fill = reorder(cluster,cluster))) +
+  geom_bar(stat = "identity", width = 0.6) +
+  labs(x = "Sample Group", y = "Percentage") +
+  scale_fill_manual(values = table_final$color) +  # Assign colors
+  theme_classic() +  # Set plot theme
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+plot_filename <- paste0(plot_directory, "/proportions_stacked_full", ".pdf")
+  #png(plot_filename, width = 1800, height = 600) 
+  pdf(plot_filename, width = 5, height = 5)  # Adjust width and height as desired
+  print(p)
+  dev.off()  
+  
+# Create a pie chart using ggplot2 with custom colors and labels
+pie_chart <- ggplot(table1, aes(x = "", y = Percentage, fill = cluster)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  theme_void() +
+  scale_fill_manual(values=cl.colors)+
+  ggtitle("Cluster Distribution") +
+  geom_text(aes(label = paste0(round(Percentage, 2), "%")), position = position_stack(vjust = 0.5)) 
+plot_filename <- paste0(plot_directory, "/proportions_pie_full", ".pdf")
+  #png(plot_filename, width = 1800, height = 600) 
+  pdf(plot_filename, width = 5, height = 5)  # Adjust width and height as desired
+  print(pie_chart)
+  dev.off()
+
+
+combined_averages <- AverageExpression(rna.combined,  return.seurat = TRUE)
+
+# Re-level object@ident
+combined_averages@active.ident <- factor(x = combined_averages@active.ident)
+
+my_levels<- unique(Idents(rna.combined_m))
+levels(combined_averages) <- my_levels
+top5_2 <- # Assuming 'top5_2' is your data frame and 'folder_GLDAS' is the column name
+top5_2 <- top5_2[!(grepl("^Gm", top5_2$gene) | grepl("Rik$", top5_2$gene)), ]
+
+
+# Assign new cluster names
+new_cluster_names<- unique(Idents(rna.combined))
+# Check if the length of new names matches the number of clusters
+if(length(new_cluster_names) == length(levels(combined_averages@active.ident))) {
+  levels(combined_averages@active.ident) <- new_cluster_names
+} else {
+  stop("Number of new cluster names does not match the number of levels in active.ident.")
+}
+
+HEATMAP<- DoHeatmap(
+  rna.combined,
+  features =unique(mrk_espn),
+  cells =NULL ,
+  group.by = "ident",
+  group.bar = TRUE,
+  group.colors = cl.colors,
+  disp.min = -2.5,
+  disp.max = 5,
+  slot="counts",
+  assay="SCT",
+  label = TRUE,
+  size = 3,
+  hjust = 0,
+  angle = 45,
+  raster = FALSE,
+  draw.lines = FALSE,
+  lines.width = NULL,
+  group.bar.height = 0.02,
+  combine = TRUE
+) + scale_fill_gradientn(colors = c("white","#e5c1c3ff", "#B34B50", "#5F070C","#240705"))
+
+HEATMAP<-HEATMAP + theme(
+  axis.text = element_text(size = 7),  # Change the size of tick labels
+  axis.title = element_text(size = 6)  # Change the size of axis titles
+)
+plot_filename <- paste0(plot_directory, "/heatmap_top5", ".pdf")
+  #png(plot_filename, width = 600, height = 600) 
+  pdf(plot_filename, width = 5, height = 10)  # Adjust width and height as desired
+  print(HEATMAP)
+  dev.off()
+
+
+```
+
+```{r}
+
+#DE subclustering
+#other method to check the DE with MAST instead of wilcox
+
+de_genes_6ohda <- list()
+de_genes_mp<- list()
+de_genes_mp11<- list()
+use_clusters <- rna.combined_sub@active.ident
+all_clusters <- as.character(sort(levels(unique(use_clusters))))
+
+rna.combined_sub_all<-rna.combined_sub
+rna.combined_sub <- subset(x = rna.combined_sub, idents = setdiff(unique(Idents(rna.combined_sub)), "Splatter"))
+
+DefaultAssay(rna.combined_sub) <- "RNA"
+rna.combined_sub <- NormalizeData(rna.combined_sub)
+
+options(digits=15)
+
+nuclei_count <-as.data.frame(table("cluster" = rna.combined_sub@active.ident, rna.combined_sub@meta.data$Sample_group))
+
+set.seed(57)
+cl_names <- c()
+for (cl in 1:length(all_clusters)) {
+    print(all_clusters[cl])
+    Ctrl_cells <- colnames(rna.combined_sub)[rna.combined_sub@active.ident %in% all_clusters[cl] & rna.combined_sub$Sample_group %in% "Control"]
+    tr_cells <- colnames(rna.combined_sub)[rna.combined_sub@active.ident %in% all_clusters[cl] & rna.combined_sub$Sample_group %in% "6OHDA"]
+
+     if (length(tr_cells) < 3 | length(Ctrl_cells) < 3){
+        print("test")
+        next
+    }
+
+    length_ct<- length(Ctrl_cells)
+    length_tr<- length(tr_cells)
+    
+    if (length_ct > length_tr){
+      
+    num_cells_to_select <- length(tr_cells)
+    selected_ct_cells <- sample(Ctrl_cells,num_cells_to_select)
+    # 
+    de_genes_6ohda[[cl]] <- FindMarkers(rna.combined_sub[["RNA"]], slot = "data", cells.1 = tr_cells, cells.2 = selected_ct_cells, test.use = "MAST", latent.vars = "Sample", min.pct = 0.05, logfc.threshold = 0.2,            features = NULL)
+      
+    }else{
+    
+      #Randomly select the same number of cells from shuffled bigger group so to have the same number of cells in the conditions
+    num_cells_to_select <- length(Ctrl_cells)
+    selected_tr_cells <- sample(tr_cells,num_cells_to_select)
+    # 
+    de_genes_6ohda[[cl]] <- FindMarkers(rna.combined_sub[["RNA"]], slot = "data", cells.1 = selected_tr_cells, cells.2 = Ctrl_cells, test.use = "MAST", latent.vars = "Sample", min.pct = 0.05, logfc.threshold = 0.2,      features = NULL)
+    }
+    
+    de_genes_6ohda[[cl]]$Gene <- rownames(de_genes_6ohda[[cl]])
+    
+    cl_names <- union(cl_names, all_clusters[cl])
+}
+names(de_genes_6ohda) <- cl_names
+
+library(openxlsx)
+write.xlsx(de_genes_6ohda, file = "Z:/dmclab/Marta/Combined_snRNAseq/subclustering/new_allen_analysis/Combined-6OHDA_wt_DEGs-cluster_res15_nospl.xlsx")
+# Specify the file path of your Excel workbook
+install.packages("readxl")
+library(readxl)
+excel_file <- "Z:/dmclab/Marta/Combined_snRNAseq/subclustering/new_allen_analysis/Combined-6OHDA_wt_DEGs-cluster_res15_nospl.xlsx"
+
+# Get the names of all sheets in the workbook
+sheet_names <- excel_sheets(excel_file)
+
+# Create an empty list to store data frames
+de_genes_6ohda <- list()
+
+# Loop through each sheet and read it into a data frame
+for (sheet_name in sheet_names) {
+  sheet_data <- read_excel(excel_file, sheet = sheet_name)
+  de_genes_6ohda[[sheet_name]] <- sheet_data
+}
+
+
+
+cl_names <- c()
+for (cl in 1:length(all_clusters)) {
+    print(all_clusters[cl])
+    Ctrl_cells <- colnames(rna.combined_sub)[rna.combined_sub@active.ident %in% all_clusters[cl] & rna.combined_sub$Sample_group %in% "Control"]
+    tr_cells <- colnames(rna.combined_sub)[rna.combined_sub@active.ident %in% all_clusters[cl] & rna.combined_sub$Sample_group %in% "Mitopark15_18"]
+
+     if (length(tr_cells) < 3 | length(Ctrl_cells) < 3){
+        print("test")
+        next
+    }
+
+    length_ct<- length(Ctrl_cells)
+    length_tr<- length(tr_cells)
+    
+    if (length_ct > length_tr){
+      
+    num_cells_to_select <- length(tr_cells)
+    selected_ct_cells <- sample(Ctrl_cells,num_cells_to_select)
+    # 
+    de_genes_mp[[cl]] <- FindMarkers(rna.combined_sub[["RNA"]], slot = "data", cells.1 = tr_cells, cells.2 = selected_ct_cells, test.use = "MAST", latent.vars = "Sample", min.pct = 0.05, logfc.threshold = 0.2,            features = NULL)
+      
+    }else{
+    
+      #Randomly select the same number of cells from shuffled bigger group so to have the same number of cells in the conditions
+    num_cells_to_select <- length(Ctrl_cells)
+    selected_tr_cells <- sample(tr_cells,num_cells_to_select)
+    # 
+    de_genes_mp[[cl]] <- FindMarkers(rna.combined_sub[["RNA"]], slot = "data", cells.1 = selected_tr_cells, cells.2 = Ctrl_cells, test.use = "MAST", latent.vars = "Sample", min.pct = 0.05, logfc.threshold = 0.2,      features = NULL)
+    }
+    
+    de_genes_mp[[cl]]$Gene <- rownames(de_genes_mp[[cl]])
+    
+    cl_names <- union(cl_names, all_clusters[cl])
+}
+
+names(de_genes_mp) <- cl_names
+write.xlsx(de_genes_mp, file = "Z:/dmclab/Marta/Combined_snRNAseq/subclustering/new_allen_analysis/Combined-mp15_18_wt_DEGs-cluster_res15_nospl.xlsx")
+excel_file <- "Z:/dmclab/Marta/Combined_snRNAseq/subclustering/new_allen_analysis/Combined-mp15_18_wt_DEGs-cluster_res15_nospl.xlsx"
+# Get the names of all sheets in the workbook
+sheet_names <- excel_sheets(excel_file)
+
+# Create an empty list to store data frames
+de_genes_mp <- list()
+
+# Loop through each sheet and read it into a data frame
+for (sheet_name in sheet_names) {
+  sheet_data <- read_excel(excel_file, sheet = sheet_name)
+  de_genes_mp[[sheet_name]] <- sheet_data
+}
+
+
+cl_names <- c()
+for (cl in 1:length(all_clusters)) {
+    print(all_clusters[cl])
+    Ctrl_cells <- colnames(rna.combined_sub)[rna.combined_sub@active.ident %in% all_clusters[cl] & rna.combined_sub$Sample_group %in% "Control"]
+    tr_cells <- colnames(rna.combined_sub)[rna.combined_sub@active.ident %in% all_clusters[cl] & rna.combined_sub$Sample_group %in% "Mitopark_11"]
+
+     if (length(tr_cells) < 3 | length(Ctrl_cells) < 3){
+        print("test")
+        next
+    }
+
+    length_ct<- length(Ctrl_cells)
+    length_tr<- length(tr_cells)
+    
+    if (length_ct > length_tr){
+      
+    num_cells_to_select <- length(tr_cells)
+    selected_ct_cells <- sample(Ctrl_cells,num_cells_to_select)
+    # 
+    de_genes_mp11[[cl]] <- FindMarkers(rna.combined_sub[["RNA"]], slot = "data", cells.1 = tr_cells, cells.2 = selected_ct_cells, test.use = "MAST", latent.vars = "Sample", min.pct = 0.05, logfc.threshold = 0.2,            features = NULL)
+      
+    }else{
+    
+      #Randomly select the same number of cells from shuffled bigger group so to have the same number of cells in the conditions
+    num_cells_to_select <- length(Ctrl_cells)
+    selected_braak_cells <- sample(tr_cells,num_cells_to_select)
+    # 
+    de_genes_mp11[[cl]] <- FindMarkers(rna.combined_sub[["RNA"]], slot = "data", cells.1 = selected_tr_cells, cells.2 = Ctrl_cells, test.use = "MAST", latent.vars = "Sample", min.pct = 0.05, logfc.threshold = 0.2,      features = NULL)
+    }
+    
+    de_genes_mp11[[cl]]$Gene <- rownames(de_genes_mp11[[cl]])
+    
+    cl_names <- union(cl_names, all_clusters[cl])
+}
+names(de_genes_mp11) <- cl_names
+write.xlsx(de_genes_mp11, file = "Z:/dmclab/Marta/Combined_snRNAseq/subclustering/new_allen_analysis/Combined-mp11_wt_DEGs-cluster_res15_nospl.xlsx")
+excel_file <- "Z:/dmclab/Marta/Combined_snRNAseq/subclustering/new_allen_analysis/Combined-mp11_wt_DEGs-cluster_res15_nospl.xlsx"
+# Get the names of all sheets in the workbook
+sheet_names <- excel_sheets(excel_file)
+
+# Create an empty list to store data frames
+de_genes_mp11 <- list()
+
+# Loop through each sheet and read it into a data frame
+for (sheet_name in sheet_names) {
+  sheet_data <- read_excel(excel_file, sheet = sheet_name)
+  de_genes_mp11[[sheet_name]] <- sheet_data
+}
+
+
+
+
+
+
+```   
+
+```{r}
+DefaultAssay(rna.combined_sub) <- "SCT"
+
+# Set a directory to save the plots
+plot_directory <- "Z:/dmclab/Marta/Combined_snRNAseq/subclustering/new_allen_analysis"
+
+
+# Create the directory if it doesn't exist
+dir.create(plot_directory, showWarnings = FALSE)
+# de.d1<- subset(de.genes.treated, column_label=="Striatum D1")
+# subset_data <- de.15.cl2[de.15.cl2$avg_log2FC >= -0.7 & de.15.cl2$avg_log2FC <= 0.7,]
+# three clusters
+table(rna.combined_sub@active.ident)
+cluster.set <- unique(rna.combined_sub$nFeature_RNA)
+# overall nFeature
+sum(rowSums(rna.combined_sub[['RNA']]@counts) != 0)
+
+
+
+de_6ohda<- bind_rows(de_genes_6ohda, .id = "cluster")
+de_6ohda <- de_6ohda %>% filter(p_val_adj < 0.0001)
+de_60hda_up<- de_6ohda %>% filter(avg_log2FC > 0.2)
+de_60hda_down<- de_6ohda %>% filter(avg_log2FC < -0.2)
+de_6ohda<- rbind(de_60hda_up,de_60hda_down)
+
+clusters<- unique(rna.combined_sub@active.ident)
+row_6ohda<- data.frame()
+
+de_mp<- bind_rows(de_genes_mp, .id = "cluster")
+de_mp <- de_mp %>% filter(p_val_adj < 0.0001)
+de_mp_up<- de_mp %>% filter(avg_log2FC > 0.2)
+de_mp_down<- de_mp %>% filter(avg_log2FC < -0.2)
+de_mp<-rbind(de_mp_up, de_mp_down)
+
+nuclei_countmp<-nuclei_count  %>% filter(Var2 == "Mitopark15_18")
+ de_mp1<-de_mp %>% group_by(cluster) %>%
+  summarise(count = n())
+
+
+de_mp11<- bind_rows(de_genes_mp11, .id = "cluster")
+de_mp11 <- de_mp11 %>% filter(p_val_adj < 0.0001)
+de_mp11_up<- de_mp11 %>% filter(avg_log2FC > 0.2)
+de_mp11_down<- de_mp11 %>% filter(avg_log2FC < -0.2)
+de_mp11<-rbind(de_mp11_up, de_mp11_down)
+
+nuclei_countmp11<-nuclei_count  %>% filter(Var2 == "Mitopark_11")
+ de_mp11_1<-de_mp11 %>% group_by(cluster) %>%
+  summarise(count = n())
+
+ rna.combined_sub<- rna.combined
+clusters<- unique(Idents(rna.combined_sub))
+table_gene_count<- data.frame()
+ for (clust in clusters){
+   subset<- subset(rna.combined_sub, Sample_group %in% c("Control", "6OHDA"))
+   subset_cluster<- subset(subset,  idents =clust)
+   subset_cluster <- subset_cluster[rowSums(subset_cluster) > 0, ]
+   gene_count<- length(rownames(subset_cluster))
+   cluster<- clust
+   gene_counts_df<- as.data.frame(gene_count, cluster)
+   table_gene_count<- rbind(table_gene_count,gene_counts_df )
+ }
+
+table_gene_count_mp<- data.frame()
+ for (clust in clusters){
+   subset<- subset(rna.combined_sub, Sample_group %in% c("Control", "Mitopark15_18"))
+   subset_cluster<- subset(subset,  idents =clust)
+   subset_cluster <- subset_cluster[rowSums(subset_cluster) > 0, ]
+   gene_count<- length(rownames(subset_cluster))
+   cluster<- clust
+   gene_counts_df<- as.data.frame(gene_count, cluster)
+   table_gene_count_mp<- rbind(table_gene_count_mp,gene_counts_df )
+   
+ }
+
+
+table_gene_count_mp11<- data.frame()
+ for (clust in clusters){
+   subset<- subset(rna.combined_sub, Sample_group %in% c("Control", "Mitopark_11"))
+   subset_cluster<- subset(subset,  idents =clust)
+   subset_cluster <- subset_cluster[rowSums(subset_cluster) > 0, ]
+   gene_count<- length(rownames(subset_cluster))
+   cluster<- clust
+   gene_counts_df<- as.data.frame(gene_count, cluster)
+   table_gene_count_mp11<- rbind(table_gene_count_mp11,gene_counts_df )
+   
+ }
+table_gene_count$Experiment<- "6OHDA"
+cluster<- rownames(table_gene_count)
+table_gene_count<- cbind(cluster, table_gene_count)
+colnames(table_gene_count)<- c("cluster","total_genes","Experiment")
+de_6ohda1<-de_6ohda %>% group_by(cluster) %>%
+  summarise(count = n())
+de_6ohda_merge <- merge(de_6ohda1, table_gene_count, by = "cluster")
+de_6ohda_merge<-transform(de_6ohda_merge, norm = count / total_genes)
+#de_6ohda_merge <- merge(de_6ohda_merge, table_colors, by = "cluster")
+
+table_gene_count_mp$Experiment<- "Mitopark 15/18"
+cluster<- rownames(table_gene_count_mp)
+table_gene_count_mp<- cbind(cluster, table_gene_count_mp)
+colnames(table_gene_count_mp)<- c("cluster","total_genes","Experiment")
+de_mp1<-de_mp %>% group_by(cluster) %>%
+  summarise(count = n())
+de_mp_merge <- merge(de_mp1, table_gene_count_mp, by = "cluster")
+de_mp_merge<-transform(de_mp_merge, norm = count / total_genes)
+#de_mp_merge <- merge(de_mp_merge, table_colors, by = "cluster")
+
+
+table_gene_count_mp11$Experiment<- "Mitopark 11"
+cluster<- rownames(table_gene_count_mp11)
+table_gene_count_mp11<- cbind(cluster, table_gene_count_mp11)
+colnames(table_gene_count_mp11)<- c("cluster","total_genes","Experiment")
+de_mp11_1<-de_mp11 %>% group_by(cluster) %>%
+  summarise(count = n())
+de_mp11_merge <- merge(de_mp11_1, table_gene_count_mp11, by = "cluster")
+de_mp11_merge<-transform(de_mp11_merge, norm = count / total_genes)
+#de_mp_merge <- merge(de_mp_merge, table_colors, by = "cluster")
+
+
+total_genes<- rbind(de_6ohda_merge, de_mp_merge)
+
+
+
+# Create the bar plot
+p<- ggplot(total_genes, aes(x = reorder(cluster, norm), y = norm, fill = Experiment)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Clusters", y = "Significat changed genes/ total genes in the cluster (p value<0.0001)", title = "Genes affected per group") +
+  #ylim(0,0.1)+
+  scale_fill_discrete(name = "Cluster")+
+   facet_grid(.~Experiment)+
+  theme(axis.text.x = element_text(angle = 45))+
+    coord_flip()+
+  theme_classic()
+plot_filename <- paste0(plot_directory, "/barplot_de_norm_02_nospl_allgenes", ".pdf")
+  #png(plot_filename, width = 600, height = 600) 
+  pdf(plot_filename, width = 13, height = 6)  # Adjust width and height as desired
+  print(p)
+  dev.off()
+  
+RColorBrewer::display.brewer.pal(n=10, name = "Blues")
+blues <- RColorBrewer::brewer.pal(n = 5, name = "Blues") 
+# Step 3: Reverse the 'blues' palette
+de_6ohda_merge <- de_6ohda_merge[order(de_6ohda_merge$norm, decreasing = FALSE), ] #reorder by affected clusters so that the last ones are the affected ones. We assign them the blues gradient in line below
+de_6ohda_merge$colors <- c(rep("grey", 6), blues)
+
+cl.colors.affected <-c("#3c8cc3ff","#08306bff","#6baed6ff","grey","grey","grey","grey","#07519cff","#c6dbefff","grey","grey","grey","grey","grey")  #manually select colors ordered like the clusters in the umap
+
+p <- DimPlot(object = rna.combined, reduction = "umap_after_harmony_3", pt.size = 0.8, label = F,cols =alpha(cl.colors.affected,1) ,raster=F, label.size = 12) + ggtitle("Most affected clusters from mild 6ohda dataset")
+
+plot_filename <- paste0(plot_directory, "/umap_de_6ohda_norm", ".pdf")
+  #png(plot_filename, width = 600, height = 600) 
+  pdf(plot_filename, width = 10, height = 8)  # Adjust width and height as desired
+  print(p)
+  dev.off() 
+  
+# Step 3: Reverse the 'blues' palette
+de_mp_merge <- de_mp_merge[order(de_mp_merge$norm, decreasing = FALSE), ] #reorder by affected clusters so that the last ones are the affected ones. We assign them the blues gradient in line below
+de_mp_merge$colors <- c(rep("grey", 7), blues)
+  #manually select colors ordered like the clusters in the umap
+cl.colors.affected <-c("#07519cff","#08306bff","#3c8cc3ff","grey","grey","grey","grey","#c6dbefff","gray","#6baed6ff","grey","grey","grey","grey")
+
+p <- DimPlot(object = rna.combined, reduction = "umap_after_harmony_3", pt.size = 0.8, label = F, cols =alpha(cl.colors.affected,1) ,raster=FALSE, label.size = 12) + ggtitle("Most affected clusters from mitopark 15/18 dataset")
+
+plot_filename <- paste0(plot_directory, "/umap_de_mp1518_norm", ".pdf")
+  #png(plot_filename, width = 600, height = 600) 
+  pdf(plot_filename, width = 10, height = 8)  # Adjust width and height as desired
+  print(p)
+  dev.off()  
+  
+  
+#venn diagragm for common up and dowmregulated genes
+mycol<- c("#963634ff","#31869bff")
+x = list(de_up= de_60hda_up$Gene, de_down= de_60hda_down$Gene)
+if (!require(devtools)) install.packages("devtools")
+devtools::install_github("yanlinlin82/ggvenn")
+library(ggvenn)
+up <- ggvenn(
+  x, 
+  fill_color = mycol,auto_scale = TRUE,
+  stroke_size = 0.5, set_name_size = 4
+  )
+# Add title after initializing the plot
+up <- up + ggtitle("Affected genes mouse subclusters putamen")
+plot_filename <- paste0(plot_directory, "/venn_diag_6ohda", ".pdf")
+  #png(plot_filename, width = 600, height = 600) 
+  pdf(plot_filename, width = 4, height = 4)  # Adjust width and height as desired
+  print(up)
+  dev.off()
+  
+  
+y=list(de_up= de_mp_up$Gene, de_down= de_mp_down$Gene)
+down<- ggvenn(
+  y, 
+  fill_color = mycol,
+  stroke_size = 0.5, set_name_size = 4
+  )
+# Add title after initializing the plot
+down <- down + ggtitle("downregulated genes")
+plot_filename <- paste0(plot_directory, "/venn_diag_mp", ".pdf")
+  #png(plot_filename, width = 600, height = 600) 
+  pdf(plot_filename, width = 13, height = 6)  # Adjust width and height as desired
+  print(down)
+  dev.off()  
+
+
+# Create the directory if it doesn't existhttp://127.0.0.1:20803/graphics/plot_zoom_png?width=926&height=852
+dir.create(plot_directory, showWarnings = FALSE)
+
+clusters <- unique(de_6ohda$cluster)
+de_6ohda<- subset(de_6ohda$cluster %in%  c() )
+#Volcano all genes
+library(EnhancedVolcano)
+  keyvals <- ifelse(
+    de_6ohda$avg_log2FC < -0.2, '#31869bff',
+      ifelse(de_6ohda$avg_log2FC > 0.2, '#963634ff',
+        'black'))
+  keyvals[is.na(keyvals)] <- 'grey'
+  names(keyvals)[keyvals == '#963634ff'] <- 'Upregulated'
+  names(keyvals)[keyvals == '#31869bff'] <- 'Dowregulated'
+  
+  p <- EnhancedVolcano(de_6ohda,
+                       lab =NA, FCcutoff = 0.4,
+                       pCutoff = 10e-6,
+                       x = "avg_log2FC", y = "p_val_adj",pointSize = 3.0,
+                        labSize = 5.0, colCustom = keyvals) +
+    ylim(0,95)+
+    xlim(-2,2)+
+    labs(x= "avg log2 FC", y="p val adjusted",title = paste("Volcano plots 6OHDA:"))+
+    theme(legend.position="none")+
+    theme_classic()
+   plot_filename <- paste0(plot_directory, "/volcano_6ohda_all_02noun",  ".pdf")
+  pdf(plot_filename, width = 6, height = 4)  # Adjust width and height as desired
+  print(p)
+  dev.off() 
+
+    keyvals <- ifelse(
+    de_mp$avg_log2FC < -0.2, '#31869bff',
+      ifelse(de_mp$avg_log2FC > 0.2, '#963634ff',
+        'black'))
+  keyvals[is.na(keyvals)] <- 'grey'
+  names(keyvals)[keyvals == '#963634ff'] <- 'Upregulated'
+  names(keyvals)[keyvals == '#31869bff'] <- 'Dowregulated'
+  
+  p <- EnhancedVolcano(de_mp,
+                       lab = NA, FCcutoff = 0.5,
+                       pCutoff = 10e-6,
+                       x = "avg_log2FC", y = "p_val_adj",pointSize = 3.0,
+                        labSize = 4.0, colCustom = keyvals) +
+    ylim(0,95)+
+    xlim(-2,2)+
+    labs(x= "avg log2 FC", y="p val adjusted",title = paste("Volcano plots Mitopark 15- 18 weeks:"))+
+    theme(legend.position="none")+
+    theme_classic()
+   plot_filename <- paste0(plot_directory, "/volcano_mp_all_02noun",  ".pdf")
+  pdf(plot_filename, width = 6, height = 4)  # Adjust width and height as desired
+  print(p)
+  dev.off() 
+  
+     keyvals <- ifelse(
+    de_mp11$avg_log2FC < -0.2, '#31869bff',
+      ifelse(de_mp11$avg_log2FC > 0.2, '#963634ff',
+        'black'))
+  keyvals[is.na(keyvals)] <- 'grey'
+  names(keyvals)[keyvals == '#963634ff'] <- 'Upregulated'
+  names(keyvals)[keyvals == '#31869bff'] <- 'Dowregulated'
+  
+  p <- EnhancedVolcano(de_mp11,
+                       lab = NA, FCcutoff = 0.5,
+                       pCutoff = 10e-6,
+                       x = "avg_log2FC", y = "p_val_adj",pointSize = 2.0,
+                        labSize = 4.0, colCustom = keyvals) +
+    ylim(0,100)+
+    xlim(-4,4)+
+    labs(x= "avg log2 FC", y="p val adjusted",title = paste("Volcano plots Mitopark 11 weeks:"))+
+    theme(legend.position="none")+
+    theme_classic()
+   plot_filename <- paste0(plot_directory, "/volcano_mp11_all_02",  ".pdf")
+  pdf(plot_filename, width = 6, height = 4)  # Adjust width and height as desired
+  print(p)
+  dev.off() 
+#& (subset_data_6ohda$avg_log2FC < -0.3 | subset_data_6ohda$avg_log2FC > 0.3), 
+  clusters<- c("D1 Matrix", "D1 Patch", "D2 Matrix","D2 Patch", "eSPN")
+for (clust in clusters) {
+  subset_data_6ohda <- de_genes_6ohda[[clust]]
+   subset_data_6ohda <- subset_data_6ohda[subset_data_6ohda$p_val_adj < 0.001 ,]
+  subset_data_mp <- de_genes_mp[[clust]]
+  subset_data_mp<-subset_data_mp[subset_data_mp$p_val_adj < 0.001 , ]
+  #   subset_data_mp11 <- de_genes_mp11[[clust]]
+  # subset_data_mp11<-subset_data_mp11[subset_data_mp11$p_val_adj < 0.001 , ]
+  # 
+
+ 
+  clust_filename <- gsub("/", "_", clust)
+  keyvals <- ifelse(
+    subset_data_6ohda$avg_log2FC < -0.2, '#31869bff',
+      ifelse(subset_data_6ohda$avg_log2FC > 0.2, '#963634ff',
+        'black'))
+  keyvals[is.na(keyvals)] <- 'grey'
+  names(keyvals)[keyvals == '#963634ff'] <- 'Upregulated'
+  names(keyvals)[keyvals == '#31869bff'] <- 'Dowregulated'
+  
+  p <- EnhancedVolcano(subset_data_6ohda,
+                       lab = NA, FCcutoff = 0.5,
+                       pCutoff = 10e-6,
+                       x = "avg_log2FC", y = "p_val_adj",pointSize = 3.0,
+                        labSize = 4.0, colCustom = keyvals) +
+    ylim(0,75)+
+    xlim(-2,2)+
+    labs(x= "avg log2 FC", y="p val adjusted",title = paste("Volcano plots for cluster IN 6OHDA:", clust))+
+    theme(legend.position="none")+
+    theme_classic()
+   plot_filename <- paste0(plot_directory, "/volcano_6ohda_col_", clust_filename, ".pdf")
+  pdf(plot_filename, width = 6, height = 4)  # Adjust width and height as desired
+  print(p)
+  dev.off() 
+  keyvals <- ifelse(
+    subset_data_mp$avg_log2FC < -0.2, '#31869bff',
+      ifelse(subset_data_mp$avg_log2FC > 0.2, '#963634ff',
+        'black'))
+  keyvals[is.na(keyvals)] <- 'grey'
+  names(keyvals)[keyvals =='#963634ff'] <- 'Upregulated'
+  names(keyvals)[keyvals =='#31869bff'] <- 'Dowregulated'
+  
+  p2 <- EnhancedVolcano(subset_data_mp,
+                       lab = NA, FCcutoff = 0.5,
+                       pCutoff = 10e-6,
+                       x = "avg_log2FC", y = "p_val_adj",pointSize = 3.0,
+                        labSize = 4.0,colCustom = keyvals) +
+        ylim(0,75)+
+    xlim(-2,2)+
+    labs(x= "avg log2 FC", y="p val adjusted",title = paste("Volcano plots for cluster IN MP:", clust))+
+    theme(legend.position="none")+
+    theme_classic()
+
+  plot_filename <- paste0(plot_directory, "/volcano_mp_col_", clust_filename, ".pdf")
+  pdf(plot_filename, width = 6, height = 4)  # Adjust width and height as desired
+  print(p2)
+  dev.off()
+  
+  # 
+  #   keyvals <- ifelse(
+  #   subset_data_mp11$avg_log2FC < -0.2, '#31869bff',
+  #     ifelse(subset_data_mp11$avg_log2FC > 0.2, '#963634ff',
+  #       'black'))
+  # keyvals[is.na(keyvals)] <- 'grey'
+  # names(keyvals)[keyvals =='#963634ff'] <- 'Upregulated'
+  # names(keyvals)[keyvals =='#31869bff'] <- 'Dowregulated'
+  # 
+  # p3 <- EnhancedVolcano(subset_data_mp11,
+  #                      lab = subset_data_mp11$Gene, FCcutoff = 0.5,
+  #                      pCutoff = 10e-6,
+  #                      x = "avg_log2FC", y = "p_val_adj",pointSize = 2.0,
+  #                       labSize = 4.0,colCustom = keyvals) +
+  #       ylim(0,100)+
+  #   xlim(-4,4)+
+  #   labs(x= "avg log2 FC", y="p val adjusted",title = paste("Volcano plots for cluster IN MP11:", clust))+
+  #   theme(legend.position="none")+
+  #   theme_classic()
+  # 
+  # plot_filename <- paste0(plot_directory, "/volcano_mp11_col_", clust_filename, ".pdf")
+  # pdf(plot_filename, width = 6, height = 4)  # Adjust width and height as desired
+  # print(p3)
+  # dev.off()
+}
+
+```
+
+```{r}
+library(ggplot2)
+library(gplots)  # For reorder_within function
+library(dplyr)
+library(tidytext)  
+library(progress)
+library(readxl)
+library(openxlsx)
+
+de_mp$Experiment <- "Mitopark"
+
+
+m1 <- data.frame(matrix(ncol = 5, nrow = 0))
+
+pb <- progress_bar$new(total = nrow(de_mp))
+for (i in 1:nrow(de_mp)){
+ # pb$tick()
+  Sys.sleep(1/nrow(de_mp))
+  for (j in 1:nrow(de_6ohda)){
+    if (de_mp[i, 1] == de_6ohda[j, 1] && de_mp[i, 7] == de_6ohda[j, 7]){
+      m1[nrow(m1)+1, 1] <- de_mp[i, 1]
+      m1[nrow(m1), 2] <- de_mp[i, 7]
+      m1[nrow(m1), 3] <- de_mp[i, 3]
+      m1[nrow(m1), 4] <- de_6ohda[j, 3]
+      if (m1[nrow(m1), 3]*m1[nrow(m1), 4] < 0){
+        m1[nrow(m1), 5] <- "Divergent"}
+       else {
+        m1[nrow(m1), 5] <- "Convergent"}
+      }
+    }
+  } 
+colnames(m1)<- c("cluster","Gene","avg_log2FC_mp","avg_log2FC_6ohda", "agreement" )
+write.xlsx(m1, file = "Z:/dmclab/Marta/Combined_snRNAseq/subclustering/new_allen_analysis/common_genes_sub_DEGs_p0001.xlsx")
+m1<- read_xlsx( "Z:/dmclab/Marta/Combined_snRNAseq/subclustering/new_allen_analysis/common_genes_sub_DEGs_p0001.xlsx")
+m1_long1<- m1[,-4]
+m1_long1$experiment <- "Mitopark"
+colnames(m1_long1)<- c("cluster","gene","avg_log2FC","agreement","experiment")
+m1_long2<- m1[,-3]
+m1_long2$experiment <- "6OHDA"
+colnames(m1_long2)<- c("cluster","gene","avg_log2FC","agreement","experiment" )
+m1_long <- rbind(m1_long1, m1_long2)
+
+
+ m1_filter<- subset(m1, agreement=="Convergent")
+  
+  
+dataset_list<- list("mild 6OHDA"=de_6ohda, "Mitopark 15_18"=de_mp, "Shared"=m1_filter)
+clusters<- unique(de_6ohda$cluster)
+
+for (i in names(dataset_list)){
+  df<- dataset_list[[i]]
+ for (clust in clusters){
+   if (i=="Shared"){
+    df1<- subset(df, cluster== clust) 
+   m1_forplots<- df1[!grepl("^Gm", df1$Gene) & !grepl("Rik$", df1$Gene)  & !grepl("Ptgds", df1$Gene)  & !grepl("Sntn", df1$Gene) & !grepl("AC149090.1", df1$Gene)& !grepl("Xist", df1$Gene)& !grepl("Uty", df1$Gene) &!grepl("Bicc1", df1$Gene) ,]
+ m1_forplots<- na.omit(m1_forplots)
+# Calculate a combined score
+mean<- cbind(m1_forplots$avg_log2FC_6ohda, m1_forplots$avg_log2FC_mp)
+m1_forplots$mean <- rowMeans(mean)
+
+# Get the 10 most negative combined scores
+most_negative <- m1_forplots[order(m1_forplots$mean), ][1:20, ]
+
+# Get the 10 most positive combined scores
+most_positive <- m1_forplots[order(-m1_forplots$mean), ][1:20, ]
+# Combine the results
+result <- rbind(most_negative, most_positive)
+result<- result[,-c(5,6)]
+result1<- result[,-4]
+result1$experiment <- "Mitopark"
+colnames(result1)<- c("cluster","gene","avg_log2FC","experiment")
+result2<- result[,-3]
+result2$experiment <- "6OHDA"
+colnames(result2)<- c("cluster","gene","avg_log2FC","experiment" )
+res_long <- rbind(result1, result2)
+plot<- ggplot(res_long, aes(reorder(gene, -avg_log2FC),avg_log2FC, fill= avg_log2FC))+
+       geom_bar(stat="identity", width=0.7, position= "dodge2")+
+        scale_fill_gradient2(
+    low = '#31869bff', 
+    mid = 'white',
+    high = '#963634ff', 
+    midpoint = 0,limits = c(-1, 1), oob = scales::squish 
+  ) +
+  ylim(-4,4)+
+  facet_wrap(.~experiment)+
+       theme_classic()+
+  theme(
+      axis.text.x = element_text( angle=0, vjust = 0.5, hjust = 0, size=10),
+      axis.text.y = element_text(size = 9),
+      axis.title.y = element_blank()
+    )+
+  coord_flip()+
+ ggtitle(paste0("Most significantly changed genes ",i)) 
+ plot_filename <- paste0(plot_directory, "/Most_sign_genes_bar_4_",clust, "_",i,".pdf")
+  pdf(plot_filename, width = 7, height = 4)   # Adjust width and height as desired
+  print(plot)
+  dev.off()  
+
+ }else{
+   df1<- subset(df, cluster== clust)
+  #df1<- subset(de_6ohda, cluster!= "Unclassified")
+   m1_forplots<- df1[!grepl("^Gm", df1$Gene) & !grepl("Rik$", df1$Gene)  & !grepl("Ptgds", df1$Gene)  & !grepl("Sntn", df1$Gene) & !grepl("AC149090.1", df1$Gene)& !grepl("Xist", df1$Gene)& !grepl("Uty", df1$Gene) &!grepl("Bicc1", df1$Gene) ,]
+
+most_negative <- m1_forplots[order(unique(m1_forplots$avg_log2FC)), ][1:20, ]
+most_positive <- m1_forplots[order(unique(-m1_forplots$avg_log2FC)), ][1:20, ]
+
+# Combine the results
+result <- rbind(most_negative, most_positive)
+result<- na.omit(result)
+
+# # Calculate the number of elements in each cluster
+#   cluster_counts <- result %>%
+#     count(cluster) %>%
+#     arrange(desc(n))
+#   
+#   # Reorder clusters based on the number of elements
+#   result <- result %>%
+#     mutate(cluster = factor(cluster, levels = cluster_counts$cluster))
+
+plot<-ggplot(result, aes(reorder(Gene, -avg_log2FC),avg_log2FC, fill= avg_log2FC))+
+       geom_bar(stat="identity", width=0.7)+
+        scale_fill_gradient2(
+    low = '#31869bff', 
+    mid = 'white',
+    high = '#963634ff', 
+    midpoint = 0,limits = c(-1, 1), oob = scales::squish 
+  ) +
+  ylim(-2.5,2.5)+
+  #facet_wrap(.~cluster, scales = "fixed", drop=TRUE)+
+       theme_classic()+
+  theme(
+      axis.text.x = element_text( angle=0, vjust = 0.5, hjust = 0, size=10),
+      axis.text.y = element_text(size = 9),
+      axis.title.y = element_blank()
+    )+
+  coord_flip()+
+ ggtitle(paste0("Most significantly changed genes ", i)) 
+ plot_filename <- paste0(plot_directory, "/Most_sign_genes_bar_3_",clust, "_",i,".pdf")
+  pdf(plot_filename, width = 5, height = 4)   # Adjust width and height as desired
+  print(plot)
+  dev.off()  
+  }
+ }
+}
+
+
+for (i in names(dataset_list)){
+  df1<- dataset_list[[i]]
+
+   if (i=="Shared"){
+
+   m1_forplots<- df1[!grepl("^Gm", df1$Gene) & !grepl("Rik$", df1$Gene)  & !grepl("Ptgds", df1$Gene)  & !grepl("Sntn", df1$Gene) & !grepl("AC149090.1", df1$Gene)& !grepl("Xist", df1$Gene)& !grepl("Uty", df1$Gene)& !grepl("Bicc1", df1$Gene),]
+# Calculate a combined score
+mean<- cbind(m1_forplots$avg_log2FC_6ohda, m1_forplots$avg_log2FC_mp)
+m1_forplots$mean <- rowMeans(mean)
+
+# Get the 10 most negative combined scores
+most_negative <- m1_forplots[order(m1_forplots$mean), ][1:20, ]
+
+# Get the 10 most positive combined scores
+most_positive <- m1_forplots[order(-m1_forplots$mean), ][1:20, ]
+# Combine the results
+result <- rbind(most_negative, most_positive)
+result<- result[,-c(5,6)]
+result1<- result[,-4]
+result1$experiment <- "Mitopark"
+colnames(result1)<- c("cluster","gene","avg_log2FC","experiment")
+result2<- result[,-3]
+result2$experiment <- "6OHDA"
+colnames(result2)<- c("cluster","gene","avg_log2FC","experiment" )
+res_long <- rbind(result1, result2)
+
+  plot<- ggplot(res_long, aes( reorder(gene, -avg_log2FC),cluster,fill= avg_log2FC))+
+       geom_tile()+
+        scale_fill_gradient2(
+    low = '#31869bff', 
+    mid = 'white',
+    high = '#963634ff', 
+    midpoint = 0,limits = c(-1, 1), oob = scales::squish 
+  ) +
+       facet_grid( .~ experiment) +
+       theme_classic()+
+  theme(
+      axis.text.x = element_text( angle=90, vjust = 0.5, hjust = 0, size=10),
+      axis.text.y = element_text(size = 12),
+      axis.title.y = element_blank()
+    ) 
+  plot_filename <- paste0(plot_directory, "/Most_sign_div_genes_",i, ".pdf")
+  pdf(plot_filename, width = 16, height = 4)  # Adjust width and height as desired
+  print(plot)
+  dev.off()  
+ }else{
+
+   m1_forplots<- df1[!grepl("^Gm", df1$Gene) & !grepl("Rik$", df1$Gene)  & !grepl("Ptgds", df1$Gene)  & !grepl("Sntn", df1$Gene) & !grepl("AC149090.1", df1$Gene)& !grepl("Xist", df1$Gene)& !grepl("Uty", df1$Gene) & !grepl("Bicc1", df1$Gene),]
+
+most_negative <- m1_forplots[order(unique(m1_forplots$avg_log2FC)), ][1:25, ]
+most_positive <- m1_forplots[order(unique(-m1_forplots$avg_log2FC)), ][1:25, ]
+
+# Combine the results
+result <- rbind(most_negative, most_positive)
+result<- na.omit(result)
+
+# # Calculate the number of elements in each cluster
+#   cluster_counts <- result %>%
+#     count(cluster) %>%
+#     arrange(desc(n))
+#   
+#   # Reorder clusters based on the number of elements
+#   result <- result %>%
+#     mutate(cluster = factor(cluster, levels = cluster_counts$cluster))
+
+
+  plot<- ggplot(result, aes( reorder(Gene, -avg_log2FC),cluster,fill= avg_log2FC))+
+       geom_tile()+
+        scale_fill_gradient2(
+    low = '#31869bff', 
+    mid = 'white',
+    high = '#963634ff', 
+    midpoint = 0,limits = c(-1, 1), oob = scales::squish 
+  ) +
+       theme_classic()+
+  theme(
+      axis.text.x = element_text( angle=90, vjust = 0.5, hjust = 0, size=10),
+      axis.text.y = element_text(size = 12),
+      axis.title.y = element_blank()
+    ) 
+  plot_filename <- paste0(plot_directory, "/Most_sign_div_genes_",i, ".pdf")
+  pdf(plot_filename, width = 8, height = 4)  # Adjust width and height as desired
+  print(plot)
+  dev.off()  
+  }
+ }
+
+
+
+```
+
