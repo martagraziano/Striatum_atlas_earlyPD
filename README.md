@@ -1,6 +1,6 @@
 <div align="center">
     <h2><strong>A molecular atlas of cell types in the mouse and human parkinsonian striatum</strong></h2>
-    <img src="snRNA seq/git_hub_image.png" alt="Description of the image" width="600" />
+    <img src="snRNA seq/git_hub_image.png" alt="Description of the image" width="400" />
 </div>
 
 Parkinson’s disease (PD) is defined by progressive dopaminergic neuron loss, disrupting the function of dopamine receptor-expressing neurons in the basal ganglia. Beyond this, the transcriptional and spatial changes in diverse striatal cell types during PD progression remain unclear. Our study combines spatial transcriptomics and single-nucleus RNA sequencing in mild and progressive PD mouse models and human postmortem tissue to map the cell-type-specific effects of dopamine degeneration. We found that both neurons and glial cells exhibit significant transcriptomic changes, with glial cells showing early and prominent effects. In mice, oligodendrocytes are the most affected glial population, whereas astrocytes display the greatest alterations in human tissue. Notably, a specific striatal projection neuron subtype, eccentric SPNs (eSPNs) and Chst9+ dSPNs, the first co-expressing Drd1 and Drd2 receptors, demonstrates resilience to dopamine loss in both mouse models and early Braak pathology stages (4) in humans.
