@@ -1,0 +1,662 @@
+---
+title: "figures 6OHDA ST data"
+author: "Yuvarani Masarapu"
+date: '2024-04-16'
+output: html_document
+---
+
+```{r}
+#X11Fonts()$sans
+#[1] "-*-helvetica-%s-%s-*-*-%d-*-*-*-*-*-*-*"
+```
+
+# Libraries
+```{r lib-load, message=FALSE, warning=FALSE, echo=FALSE}
+library(Seurat)
+library(SeuratObject)
+library(STutility)
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+library(data.table)
+library(Signac)
+library(cowplot)
+library(grid)
+library(GenomeInfoDb)
+library(dplyr)
+library(Biobase)
+library(BiocManager)
+library(AnnotationDbi)
+```
+
+# Objects
+```{r eval=FALSE}
+spatial.data <- readRDS("C:/Users/magraz/OneDrive - Karolinska Institutet/Parkinson Project-common folder/analysis_results/clustering_results_parkinsons_6OHDA/clusters_res2.0_USED/data.integrated.clusters_2022-08-22.rds")
+excel_file <-"C:/Users/magraz/OneDrive - Karolinska Institutet/Parkinson Project-common folder/analysis_results/clustering_results_parkinsons_6OHDA/clusters_res2.0_USED/DE_control_vs_treated/DE_genes_control_vs_treated_per_cluster.xlsx"
+de_genes<- read_xlsx(excel_file)
+# Get the names of all sheets in the workbook
+sheet_names <- excel_sheets(excel_file)
+
+# Create an empty list to store data frames
+de_genes <- list()
+
+# Loop through each sheet and read it into a data frame
+for (sheet_name in sheet_names) {
+  sheet_data <- read_excel(excel_file, sheet = sheet_name)
+  de_genes[[sheet_name]] <- sheet_data
+}
+
+de<- bind_rows(de_genes, .id = "cluster")
+de <- de %>% filter(p_val_adj < 0.0001)
+
+plot_directory<- "C:/Users/magraz/OneDrive - Karolinska Institutet/Parkinson Project-common folder/analysis_results/clustering_results_parkinsons_6OHDA/clusters_res2.0_USED" 
+#CLUSTER MARKERS
+wnn_markers<- read.csv("C:/Users/magraz/OneDrive - Karolinska Institutet/Parkinson Project-common folder/analysis_results/clustering_results_parkinsons_6OHDA/clusters_res2.0_USED/cluster_markers_res2.0.csv")
+top10B<- wnn_markers %>%   
+    group_by(cluster) %>%
+    slice_max(n =5, order_by = avg_log2FC) %>%
+    print(n = 1000)
+
+#subclusters
+spatial.data <- readRDS("C:/Users/magraz/OneDrive - Karolinska Institutet/Parkinson Project-common folder/analysis_results/clustering_results_parkinsons_6OHDA/clusters_res2.0_USED/sub-clustering/variable_features_5000/data.integrated_subset_intfeat_3.rds")
+excel_file <-"C:/Users/magraz/OneDrive - Karolinska Institutet/Parkinson Project-common folder/analysis_results/clustering_results_parkinsons_6OHDA/clusters_res2.0_USED/sub-clustering/variable_features_5000/DE_genes_control_vs_treated_per_cluster.xlsx"
+de_genes<- read_xlsx(excel_file)
+# Get the names of all sheets in the workbook
+sheet_names <- excel_sheets(excel_file)
+
+# Create an empty list to store data frames
+de_genes <- list()
+
+# Loop through each sheet and read it into a data frame
+for (sheet_name in sheet_names) {
+  sheet_data <- read_excel(excel_file, sheet = sheet_name)
+  de_genes[[sheet_name]] <- sheet_data
+}
+
+de<- bind_rows(de_genes, .id = "cluster")
+de <- de %>% filter(p_val_adj < 0.0001)
+
+indir <- getwd()
+
+colors.cl <- c("#F18F01", "#878787", "#FCCDE5", "#048BA8", "#2E4057", "#99C24D", "#B95F89", "#5F070C" ,  "#DFC27D", "#DB6C79", "#B191FF", "#157A6E", "#73683B", "#97C8EB","#C51B7D", "#BA9763", "#31081F", "#52D1DC", "#700353", "#F5D3C8", "#725752", "#D8315B", "#6B4E71", "#8CBFCF" , "#C2B2B4", "#EDE5A6", "#52B788", "#EE1B26", "#F2F230", "#91F291", "#386CB0", "#E7298A")
+```
+
+# Stats plots
+
+## Raw reads per spot
+
+### Whole dataset
+```{r}
+p <- VlnPlot(object = spatial.data, features = "nCount_Spatial", group.by = "orig.ident", pt.size = 0, assay = "Spatial") + ggtitle("UMI/spot for 6OHDA ST dataset")
+
+p1 <- VlnPlot(object = spatial.data, features = "nFeature_Spatial", group.by = "orig.ident", pt.size = 0, assay = "Spatial") + ggtitle("Genes/spot for 6OHDA ST dataset")
+
+p2 <- p - p1
+
+p2
+
+ggsave(p2, filename = paste(indir, "/stats/stats_whole_dataset/stats_perSpot_unnormalised.pdf", sep = ""), dpi = 300, width = 10, height = 5)
+```
+
+### Per section
+```{r}
+p <- VlnPlot(object = spatial.data, features = "nCount_Spatial", group.by = "sample_id", pt.size = 0, assay = "Spatial") + ggtitle("UMI/spot for 6OHDA ST dataset") + NoLegend()
+
+p1 <- VlnPlot(object = spatial.data, features = "nFeature_Spatial", group.by = "sample_id", pt.size = 0, assay = "Spatial") + ggtitle("Genes/spot for 6OHDA ST dataset")
+
+p2 <- p - p1
+
+p2
+
+ggsave(p2, filename = paste(indir, "/stats/stats_per_section/stats_perSpot_unnormalised_groupby_sections.pdf", sep = ""), dpi = 300, width = 16, height = 5)
+```
+
+### Split by condition
+```{r}
+p <- VlnPlot(object = spatial.data, features = "nCount_Spatial", group.by = "sample_type", pt.size = 0, assay = "Spatial") + ggtitle("UMI/spot for 6OHDA ST dataset") + NoLegend()
+
+p1 <- VlnPlot(object = spatial.data, features = "nFeature_Spatial", group.by = "sample_type", pt.size = 0, assay = "Spatial") + ggtitle("Genes/spot for 6OHDA ST dataset")
+
+p2 <- p - p1
+
+p2
+
+ggsave(p2, filename = paste(indir, "/stats/stats_per_condition/stats_perSpot_unnormalised_groupby_condition.pdf", sep = ""), dpi = 300, width = 10, height = 5)
+```
+
+## Normalised reads per spot
+
+### Overall
+
+```{r}
+p <- VlnPlot(object = spatial.data, features = "nCount_SCT", group.by = "orig.ident", pt.size = 0, assay = "SCT") + ggtitle("UMI/spot for 6OHDA ST dataset (SCT)")
+
+p1 <- VlnPlot(object = spatial.data, features = "nFeature_SCT", group.by = "orig.ident", pt.size = 0, assay = "SCT") + ggtitle("Genes/spot for 6OHDA ST dataset (SCT)")
+
+p2 <- p - p1
+
+p2
+
+ggsave(p2, filename = paste(indir, "/stats/stats_whole_dataset/stats_perSpot_Normalised.pdf", sep = ""), dpi = 300, width = 10, height = 5)
+```
+
+### Per section
+
+```{r}
+p <- VlnPlot(object = spatial.data, features = "nCount_SCT", group.by = "sample_id", pt.size = 0, assay = "SCT") + ggtitle("UMI/spot for 6OHDA ST dataset (SCT)") + NoLegend()
+
+p1 <- VlnPlot(object = spatial.data, features = "nFeature_SCT", group.by = "sample_id", pt.size = 0, assay = "SCT") + ggtitle("Genes/spot for 6OHDA ST dataset (SCT)")
+
+p2 <- p - p1
+
+p2
+
+ggsave(p2, filename = paste(indir, "/stats/stats_per_section/stats_perSpot_Normalised_groupby_sections.pdf", sep = ""), dpi = 300, width = 16, height = 5)
+```
+
+### Split by condition
+```{r}
+p <- VlnPlot(object = spatial.data, features = "nCount_SCT", group.by = "sample_type", pt.size = 0, assay = "SCT") + ggtitle("UMI/spot for 6OHDA ST dataset (SCT)") + NoLegend()
+
+p1 <- VlnPlot(object = spatial.data, features = "nFeature_SCT", group.by = "sample_type", pt.size = 0, assay = "SCT") + ggtitle("Genes/spot for 6OHDA ST dataset (SCT)")
+
+p2 <- p - p1
+
+p2
+
+ggsave(p2, filename = paste(indir, "/stats/stats_per_condition/stats_perSpot_Normalised_groupby_condition.pdf", sep = ""), dpi = 300, width = 10, height = 5)
+```
+
+# UMAP clusters
+
+## Whole dataset
+```{r}
+p <- DimPlot(object = spatial.data, reduction = "umap_after_harmony", group.by = "seurat_clusters", label = T, pt.size = 0.5, cols = colors.cl)
+ggsave(plot = p, filename = paste(indir, "/clusters/UMAPs/seurat_clusters_ST_6OHDA_UMAP.pdf", sep = ""), height = 10, width = 12, dpi = 300)
+```
+
+## Split by condition
+```{r}
+p <- DimPlot(object = spatial.data, reduction = "umap_after_harmony", group.by = "seurat_clusters", label = T, pt.size = 0.5, split.by = "sample_type", cols = colors.cl)
+ggsave(plot = p, filename = paste(indir, "/clusters/UMAPs/seurat_clusters_ST_6OHDA_UMAP_splitby_condition.pdf", sep = ""), height = 10, width = 20, dpi = 300)
+```
+
+# Violins for clusters
+```{r}
+p <- VlnPlot(object = spatial.data, features = "nCount_Spatial", group.by = "seurat_clusters", pt.size = 0, assay = "Spatial", cols = colors.cl) + ggtitle("UMI/spot for 6OHDA ST dataset") + NoLegend()
+
+p1 <- VlnPlot(object = spatial.data, features = "nFeature_Spatial", group.by = "seurat_clusters", pt.size = 0, assay = "Spatial", cols = colors.cl) + ggtitle("Genes/spot for 6OHDA ST dataset")
+
+p2 <- p - p1
+
+p2
+
+ggsave(p2, filename = paste(indir, "/stats/stats_perSpot_unnormalised_groupby_Clusters.pdf", sep = ""), dpi = 300, width = 20, height = 6)
+```
+
+# Spatial heatmaps of clusters
+
+## with tissue background
+
+```{r fig.height=16, fig.width=16}
+images <- c("slice1", "slice1.1", "slice1.2", "slice1.3", "slice1.4", "slice1.5", "slice1.6", "slice1.7", "slice1.8", "slice1.9", "slice1.10", "slice1.11",
+            "slice1.12", "slice1.13", "slice1.14", "slice1.15", "slice1.16", "slice1.17", "slice1.18", "slice1.19", "slice1.20", "slice1.21", "slice1.22", "slice1.23")
+samples <- unique(spatial.data$sample_id)
+names(colors.cl) <- levels(spatial.data)
+
+for(i in 1:length(images)){
+  p <- SpatialPlot(object = spatial.data, pt.size.factor = 1, crop = FALSE, image.alpha = 1, label = TRUE, group.by = "seurat_clusters", images = images[i], cols = colors.cl) + ggtitle(samples[i])
+ggsave(plot = p, filename = paste(indir, "/clusters/clusters_on_tissue/spatial_plots_clusters_on_tissue", samples[i], ".pdf", sep = ""), dpi = 300, width = 8, height = 8)
+}
+```
+
+## without tissue background
+
+```{r fig.height=16, fig.width=16}
+images <- c("slice1", "slice1.1", "slice1.2", "slice1.3", "slice1.4", "slice1.5", "slice1.6", "slice1.7", "slice1.8", "slice1.9", "slice1.10", "slice1.11",
+            "slice1.12", "slice1.13", "slice1.14", "slice1.15", "slice1.16", "slice1.17", "slice1.18", "slice1.19", "slice1.20", "slice1.21", "slice1.22", "slice1.23")
+samples <- unique(spatial.data$sample_id)
+names(colors.cl) <- levels(spatial.data)
+
+for(i in 1:length(images)){
+  p <- SpatialPlot(object = spatial.data, pt.size.factor = 1, crop = FALSE, image.alpha = 0, label = TRUE, group.by = "seurat_clusters", images = images[i], cols = colors.cl) + ggtitle(samples[i])
+ggsave(plot = p, filename = paste(indir, "/clusters/clusters_without_tissue/spatial_plots_clusters_NoTissue_", samples[i], ".pdf", sep = ""), dpi = 300, width = 8, height = 8)
+}
+```
+
+
+# Heatmap cluster markers
+
+## markers for ST 6OHDA dataset
+
+Heatmap with white to dark brown color scale would be good
+Also try the DoHeatmap from seurat for the plot
+
+```{r}
+DefaultAssay(spatial.data) <- "SCT"
+wnn_markers <- FindAllMarkers(spatial.data, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25, recorrect_umi = FALSE)
+```
+
+```{r}
+library(dplyr)
+top10B <- wnn_markers %>%
+  group_by(cluster) %>%
+  dplyr::filter(p_val_adj < 0.01) %>%
+  dplyr::filter(row_number() %in% 1:5)
+markers<- c("Mbp","Tnc","Cx3cr1","Slc1a3","Sox10","Pdgfra","Gfap","Aldh1l1","Slc17a7","Slc17a6" ,"Slc32a1","Gad2","Sst","Npy","Pvalb","Chat","Ache","Slc18a3","Gpr6","Ppp1r1b","Rgs9" ,"Gpr88","Adora2a","Drd2","Penk","Pdyn","Tac1","Drd1","Col11a1","Sema5b","Oprm1","Th","Crym", "Dlk1", "Gpr155")
+d3<-DotPlot(spatial.data, features =unique(top10B$gene)) +
+  scale_colour_gradientn(colours =rev(c("white","gray","#6d7173ff", "#B34B50", "#5F070C","#240705") )%>% rev()) + labs(y = "cluster")+
+   theme(axis.text.x = element_text(angle = 0, vjust = 0.8, hjust=-0.3))+
+  #scale_x_discrete(position = "bottom") +
+  theme(axis.text = element_text(family = "sans", size = 10),
+        axis.title = element_text(family = "sans", size = 10),
+        legend.key.size = unit(5, units = "mm"),
+        legend.text = element_text(family = "sans", size = 10),
+        legend.title = element_text(family = "sans", size = 10))+
+ scale_size(range = c(1,8))+
+  coord_flip()
+ggsave(d3, filename = paste0(plot_directory, "/dotplot_ST-6OHDA_cl_markers_sel_top.pdf"), dpi = 300, height = 25, width = 14)
+```
+
+# Spatial heatmaps for marker genes
+
+```{r}
+heatmap.cl <- c("gray","#fbc9b0ff","#e9896cff","#B34B50", "#5F070C")
+```
+
+## Striatal
+```{r}
+genes <- c("Adora2a", "Cnr1", "Col6a1", "Crym", "Dlk1", "Drd2", "Epha4", "Gpr155", "Id4", "Kremen1", "Lypd1", "Oprm1", "Sema5b", "Sgk1", "Spon1", "Tac1", "Tshz1", "Wfs1")
+
+for(i in 1:length(genes)){
+  plots <- list()
+  for(j in 1:length(images)){
+    plots[[j]] <- SpatialFeaturePlot(object = spatial.data, features = genes[i], pt.size.factor = 1.2, stroke = 0, crop = FALSE, image.alpha = 0, images = images[j]) +
+    ggtitle(samples[j]) +  
+    scale_fill_gradientn(colors = heatmap.cl) +
+    theme(legend.key.size = unit(2, units = "mm"),
+          legend.text = element_text(size = 3),
+          legend.title = element_text(size = 5),
+          plot.title = element_text(size = 3))
+  }
+  p <- cowplot::plot_grid(plotlist = plots, nrow = 5, ncol = 5)
+  ggsave(plot = p, filename = paste(indir, "/markers/spatial_heatmaps/striatal/", genes[i], ".pdf", sep = ""), dpi = 300, width = 210, height = 297, units = "mm")
+}
+```
+
+## Cortex
+```{r}
+genes <- c("Slc17a6", "Slc17a7", "Rbp4", "Tlx3", "Pvalb", "Npy", "Chat", "Cux2")
+
+for(i in 1:length(genes)){
+  plots <- list()
+  for(j in 1:length(images)){
+    plots[[j]] <- SpatialFeaturePlot(object = spatial.data, features = genes[i], pt.size.factor = 1.2, stroke = 0, crop = FALSE, image.alpha = 0, images = images[j]) +
+    ggtitle(samples[j]) +  
+    scale_fill_gradientn(colors = heatmap.cl) +
+    theme(legend.key.size = unit(2, units = "mm"),
+          legend.text = element_text(size = 3),
+          legend.title = element_text(size = 5),
+          plot.title = element_text(size = 3))
+  }
+  p <- cowplot::plot_grid(plotlist = plots, nrow = 5, ncol = 5)
+  ggsave(plot = p, filename = paste(indir, "/markers/spatial_heatmaps/cortex/", genes[i], ".pdf", sep = ""), dpi = 300, width = 210, height = 297, units = "mm")
+}
+```
+
+## Glia
+```{r}
+genes <- c("Nr4a1","Egr1")
+
+for(i in 1:length(genes)){
+  plots <- list()
+  for(j in 1:length(images)){
+    plots[[j]] <- SpatialFeaturePlot(object = spatial.data, features = genes[i], pt.size.factor = 1.2, stroke = 0, crop = FALSE, image.alpha = 0, images = images[j]) +
+    ggtitle(samples[j]) +  
+    scale_fill_gradientn(colors = heatmap.cl,, limits=c(0,2)) +
+    theme(legend.key.size = unit(2, units = "mm"),
+          legend.text = element_text(size = 3),
+          legend.title = element_text(size = 5),
+          plot.title = element_text(size = 3))
+  }
+  p <- cowplot::plot_grid(plotlist = plots, nrow = 5, ncol = 5)
+    ggsave(plot = p, filename = paste(plot_directory, "/spatial_heatmaps_newcolors_",genes[i], ".pdf", sep = ""), dpi = 300, width = 210, height = 297, units = "mm")
+}
+```
+
+# UMAP marker genes
+
+## Whole dataset
+
+### Striatal
+
+#### All spots in one UMAP
+```{r}
+genes <- c("Adora2a", "Cnr1", "Col6a1", "Crym", "Dlk1", "Drd2", "Epha4", "Gpr155", "Id4", "Kremen1", "Lypd1", "Oprm1", "Sema5b", "Sgk1", "Spon1", "Tac1", "Tshz1", "Wfs1", "Drd1")
+
+for(i in 1:length(genes)){
+  p <- FeaturePlot(object = spatial.data, reduction = "umap_after_harmony", features = genes[i], pt.size = 0.2, cols = heatmap.cl)
+  ggsave(plot = p, filename = paste(indir, "/markers/UMAPs/striatal/one_full_umap/", genes[i], ".pdf", sep = ""), height = 10, width = 12, dpi = 300)
+}
+```
+
+#### All spots but split by condition for 2 UMAPs
+```{r}
+genes <- c("Adora2a", "Cnr1", "Col6a1", "Crym", "Dlk1", "Drd2", "Epha4", "Gpr155", "Id4", "Kremen1", "Lypd1", "Oprm1", "Sema5b", "Sgk1", "Spon1", "Tac1", "Tshz1", "Wfs1")
+
+for(i in 1:length(genes)){
+  p <- FeaturePlot(object = spatial.data, reduction = "umap_after_harmony", features = genes[i], pt.size = 0.2, cols = heatmap.cl, split.by = "sample_type")
+  ggsave(plot = p, filename = paste(indir, "/markers/UMAPs/striatal/split_condition/", genes[i], ".pdf", sep = ""), height = 10, width = 20, dpi = 300)
+}
+```
+
+### Cortex
+
+#### All spots in one UMAP
+```{r}
+genes <- c("Slc17a6", "Slc17a7", "Rbp4", "Tlx3", "Pvalb", "Npy", "Chat", "Cux2")
+
+for(i in 1:length(genes)){
+  p <- FeaturePlot(object = spatial.data, reduction = "umap_after_harmony", features = genes[i], pt.size = 0.2, cols = heatmap.cl)
+  ggsave(plot = p, filename = paste(indir, "/markers/UMAPs/cortex/one_full_umap/", genes[i], ".pdf", sep = ""), height = 10, width = 12, dpi = 300)
+}
+```
+
+#### All spots but split by condition for 2 UMAPs
+```{r}
+genes <- c("Nr4a1", "Egr1", "Lars2", "Gpr155", "Slc17a7", "Crym")
+
+for(i in 1:length(genes)){
+  p <- FeaturePlot(object = spatial.data, reduction = "umap_after_harmony", features = genes[i], pt.size = 0.2, split.by = "sample_type")& theme(legend.position = "right") &scale_color_gradientn(colors = c("gray","#B34B50", "#5F070C"), limits=c(0,2))
+
+  ggsave(plot = p, filename = paste(plot_directory, "/Umap_split_newcolors_",genes[i], ".pdf", sep = ""), height = 10, width = 21, dpi = 300)
+}
+
+for(i in 1:length(genes)){
+  p <- FeaturePlot(object = spatial.data, reduction = "umap_after_harmony", features = genes[i], pt.size = 0.2)& theme(legend.position = "right") &scale_color_gradientn(colors = c("gray","#B34B50", "#5F070C"), limits=c(0,4))
+
+  ggsave(plot = p, filename = paste(plot_directory, "/Umap_newcolors_",genes[i], ".pdf", sep = ""), height = 10, width = 11, dpi = 300)
+}
+```
+
+## Glia
+```{r}
+genes <- c("Mbp","Tnc","Cx3cr1","Slc1a3","Pdgfra","Gfap")
+
+for(i in 1:length(genes)){
+  p <- FeaturePlot(object = spatial.data, reduction = "umap_after_harmony", features = genes[i], pt.size = 0.2, cols = heatmap.cl)
+  ggsave(plot = p, filename = paste(indir, "/markers/UMAPs/glia/one_full_umap/", genes[i], ".pdf", sep = ""), height = 10, width = 12, dpi = 300)
+}
+```
+
+## Split by condition
+```{r}
+genes <- c("Mbp","Tnc","Cx3cr1","Slc1a3","Pdgfra","Gfap")
+
+for(i in 1:length(genes)){
+  p <- FeaturePlot(object = spatial.data, reduction = "umap_after_harmony", features = genes[i], pt.size = 0.2, cols = heatmap.cl, split.by = "sample_type")
+  ggsave(plot = p, filename = paste(indir, "/markers/UMAPs/cortex/split_condition/", genes[i], ".pdf", sep = ""), height = 10, width = 20, dpi = 300)
+}
+```
+
+top 10 genes and delta of significative change.
+````{r}
+#subclusters
+
+de<-de[!de$cluster == "15", ]
+
+nuclei_count <-as.data.frame(table("cluster" = spatial.data@active.ident, spatial.data@meta.data$sample_type))
+
+nuclei_count<-nuclei_count  %>% filter(Var2 == "Treated")
+ de_1<-de %>% group_by(cluster) %>%
+  summarise(count = n())
+de_merge <- merge(de_1, nuclei_count, by = "cluster")
+de_merge <- transform(de_merge, Perc = count / Freq)
+total_genes<- sum(de_merge$Freq)
+de_merge<-transform(de_merge, norm = Freq / total_genes)
+
+clusters<- unique(Idents(spatial.data))
+
+table_gene_count_old<- data.frame()
+ for (clust in clusters){
+   #subset<- subset(spatial.data, sample_type== "Treated")
+   subset_cluster<- subset(spatial.data,  idents =clust)
+   subset_cluster <- subset_cluster[rowSums(subset_cluster) > 0, ]
+   gene_count<- length(rownames(subset_cluster))
+   cluster<- clust
+   gene_counts_df<- as.data.frame(gene_count, cluster)
+   table_gene_count_old<- rbind(table_gene_count_old,gene_counts_df )
+ }
+
+table_gene_count_old$Experiment<- "mild 6OHDA"
+
+cluster<- rownames(table_gene_count_old)
+table_gene_count_old<- cbind(cluster, table_gene_count_old)
+colnames(table_gene_count_old)<- c("cluster","total_genes","Experiment")
+de_merge_old <- merge(de_1, table_gene_count_old, by = "cluster")
+de_merge_old<-transform(de_merge_old, norm = count / total_genes)
+#de_6ohda_merge <- merge(de_6ohda_merge, table_colors, by = "cluster")
+
+
+plot_directory<- "C:/Users/magraz/OneDrive - Karolinska Institutet/Parkinson Project-common folder/figures/ST_figure"
+dir.create(plot_directory)
+# Create the bar plot
+options(scipen=999)
+p<- ggplot(de_merge_old, aes(x = reorder(cluster, norm), y = norm)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Clusters", y = "Significant changed genes/ total genes in the cluster (p value<0.0001)", title = "Genes affected per group") +
+  #ylim(0,0.0025)+
+  scale_y_continuous(
+    breaks = c(seq(0, max(de_merge$norm), by = 0.0005), max(de_merge$norm))  # Ensures max is included
+  ) +
+  scale_fill_discrete(name = "Cluster")+
+  theme(axis.text.x = element_text(angle = 45))+
+    coord_flip()+
+  theme_classic()
+plot_filename <- paste0(plot_directory, "/barplot_de_norm_no15", ".pdf")
+  #png(plot_filename, width = 600, height = 600) 
+  pdf(plot_filename, width = 4, height = 3)  # Adjust width and height as desired
+  print(p)
+  dev.off()
+  
+  
+  
+  for (clust in clusters){
+df1<- subset(de, cluster== clust)
+  
+de<- de[!grepl("Ttr", de$gene) & !grepl("Malat1", de$gene) & !grepl("AC149090.1", de$gene) & !grepl("AC149090.1", de$gene),]
+most_negative <- de[order(unique(de$avg_log2FC)), ][1:40, ]
+most_positive <- de[order(unique(-de$avg_log2FC)), ][1:40, ]
+
+# Combine the results
+result <- rbind(most_negative, most_positive)
+result<- na.omit(result)
+
+# Calculate the number of elements in each cluster
+  cluster_counts <- result %>%
+    count(cluster) %>%
+    arrange(desc(n))
+  
+  # Reorder clusters based on the number of elements
+  result <- result %>%
+    mutate(cluster = factor(cluster, levels = cluster_counts$cluster))
+
+plot<-ggplot(result, aes( cluster, reorder(gene, -avg_log2FC),fill= avg_log2FC))+
+       geom_tile()+
+        scale_fill_gradient2(
+    low = '#31869bff', 
+    mid = 'white',
+    high = '#963634ff', 
+    midpoint = 0,limits = c(-1, 1), oob = scales::squish 
+  ) +
+  #facet_wrap(.~cluster, scales = "fixed", drop=TRUE)+
+       theme_classic()+
+  theme(
+      axis.text.x = element_text( angle=90, vjust = 0.5, hjust = 0, size=7),
+      axis.text.y = element_text(size = 10),
+      axis.title.y = element_blank()
+    )+
+  coord_flip()+
+ ggtitle(paste("Most significantly changed genes")) 
+ plot_filename <- paste0(plot_directory, "/Most_sign_genes_nothresh_no15",".pdf")
+  pdf(plot_filename, width = 9, height = 5)   # Adjust width and height as desired
+  print(plot)
+  dev.off()  
+
+  result$color_category <- ifelse(result$avg_log2FC > 0, "above_zero", "below_zero")
+
+plot1 <- ggplot(result, aes(avg_log2FC, reorder(Gene, -avg_log2FC), color = color_category)) +
+  geom_point(size = 4) +
+  scale_color_manual(values = c("below_zero" = '#31869bff', "above_zero" = '#963634ff')) +
+  scale_x_continuous(breaks = seq(-3, 3, by = 1), limits = c(-3, 3)) +
+  geom_vline(xintercept = 0, linetype = "dotted", color = "black") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 0.5, hjust = 0, size = 7),
+    axis.text.y = element_text(size = 12),
+    axis.title.y = element_blank()
+  ) +
+  ggtitle(paste("Most significantly changed genes "))
+    
+  plot_filename <- paste0(plot_directory, "/Most_sign_genes_dot_nothres_",clust,".pdf")
+  pdf(plot_filename, width = 4, height = 8)   # Adjust width and height as desired
+  print(plot1)
+  dev.off()  
+  
+}
+  
+  
+  
+
+````
+# Same as Panel E (significant genes by total genes) for main clusters
+
+We show the most affected clusters and genecount here that way.
+
+```{r}
+indir <- getwd()
+
+library(readxl)
+de_genes <- read_excel("C:/Users/magraz/OneDrive - Karolinska Institutet/Parkinson Project-common folder/analysis_results/clustering_results_parkinsons_6OHDA/clusters_res2.0_USED/DE_control_vs_treated/DE_genes_control_vs_treated_per_cluster.xlsx",
+    sheet = "0")
+de_genes$cluster <- c(rep("0", length(de_genes$gene)))
+for(i in 1:(length(levels(spatial.data))-1)){
+  temp <- read_excel("C:/Users/magraz/OneDrive - Karolinska Institutet/Parkinson Project-common folder/analysis_results/clustering_results_parkinsons_6OHDA/clusters_res2.0_USED/DE_control_vs_treated/DE_genes_control_vs_treated_per_cluster.xlsx", sheet = i)
+  temp$cluster <- c(rep(i, length(temp$gene)))
+  temp <- temp[temp$p_val_adj < 0.0001, ]
+ 
+  de_genes <- rbind(de_genes, temp)
+}
+```
+
+```{r}
+length(unique(de_genes$gene))
+
+min(de_genes$avg_log2FC[de_genes$avg_log2FC > 0])
+max(de_genes$avg_log2FC[de_genes$avg_log2FC < 0])
+```
+
+
+### Whole dataset
+```{r}
+table_gene_count <- data.frame()
+clusters <- c("0","1","2","3","4","5","6","7","8","9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31")
+for (clust in clusters){
+   subset_cluster <- spatial.data[, spatial.data$seurat_clusters %in% clust]
+   #subset_cluster <- subset(subset_cluster, sample_type== "Control")
+   subset_cluster <- subset_cluster[rowSums(subset_cluster) > 0, ]
+   gene_count<- length(rownames(subset_cluster))
+   cluster <- clust
+   gene_counts_df<- as.data.frame(gene_count, cluster)
+   table_gene_count<- rbind(table_gene_count,gene_counts_df)
+   
+   rm(subset)
+   rm(subset_cluster)
+ }
+
+de <- de_genes
+cluster <- rownames(table_gene_count)
+table_gene_count<- cbind(cluster, table_gene_count)
+colnames(table_gene_count)<- c("cluster","total_genes")
+de_1 <- de %>% group_by(cluster) %>% summarise(count = n())
+de_merge <- merge(de_1, table_gene_count, by = "cluster")
+de_merge <- transform(de_merge, norm = count / total_genes)
+
+RColorBrewer::display.brewer.all()
+#RColorBrewer::display.brewer.pal(n=9, name = "Blues")
+blues <- RColorBrewer::brewer.pal(n = 9, name = "Blues") #we will take all the 9 colors from here
+
+de_merge_old <- de_merge_old[order(de_merge_old$norm, decreasing = FALSE), ] #reorder by affected clusters so that the last ones are the affected ones. We assign them the blues gradient in line below
+de_merge_old$colors <- c(rep("grey", 19), blues) #we only have 28 clusters affected but total we have 32 clusters, missing clusters will also get grey color
+
+de_merge$cluster <- as.numeric(de_merge$cluster) #change clusters column to numeric to run the logic below
+de_merge <- de_merge[order(de_merge$cluster, decreasing = FALSE), ] #We reorder by cluster number so we know which clusters are missing and then assign them grey color according to their order in line below
+
+cl.colors.affected <- c(de_merge$colors[1:15], "grey", de_merge$colors[16:18], "grey", de_merge$colors[19:28] , "grey", "grey") #assign missing clusters color grey
+
+
+#CHECK
+
+# Step 1: Remove cluster 16
+de_merge_old <- de_merge_old[de_merge_old$cluster != 16, ]
+
+# Step 2: Reorder by 'norm' in descending order
+de_merge_old <- de_merge_old[order(de_merge_old$norm, decreasing = FALSE), ]
+
+# Step 3: Reverse the 'blues' palette
+reversed_blues <- rev(blues)
+
+# Step 4: Assign colors
+# First 9 clusters get reversed "Blues" gradient
+# Remaining clusters get "grey"
+de_merge_old$colors <- rev(c(reversed_blues, rep("grey", nrow(de_merge_old) - 9)))#we only have 28 clusters affected but total we have 32 clusters, missing clusters will also get grey color
+
+de_merge_old$cluster <- as.numeric(de_merge_old$cluster) #change clusters column to numeric to run the logic below
+de_merge_old <- de_merge_old[order(de_merge_old$cluster, decreasing = FALSE), ] #We reorder by cluster number so we know which clusters are missing and then assign them grey color according to their order in line below
+
+cl.colors.affected <- c(de_merge$colors[1:15], "grey", de_merge$colors[16:18], "grey", de_merge$colors[19:28] , "grey", "grey") #assign missing clusters color grey
+
+
+gradient_colors<- c(reversed_blues, "grey")
+# Create a data frame for plotting
+
+# Create a data frame for a horizontal gradient
+gradient_df <- data.frame(
+  x = seq(0, 1, length.out = 100),  # Smooth gradient along x-axis
+  y = 1                            # Single row for a horizontal rectangle
+)
+
+# Plot the gradient as a single horizontal rectangle
+p<- ggplot(gradient_df, aes(x = x, y = y)) +
+  geom_tile(aes(fill = x), height = 2) +  # Increase the height for larger rectangles
+  scale_fill_gradientn(colors = gradient_colors) +  # Use custom gradient colors
+  coord_fixed(ratio = 0.1) +  # Set aspect ratio to make it a horizontal rectangle
+  theme_void() 
+plot_filename <- paste0("C:/Users/magraz/OneDrive - Karolinska Institutet/Parkinson Project-common folder/figures/ST_figure/most_affected_clusters/legend_bar",".pdf")
+  pdf(plot_filename, width = 4, height = 4)   # Adjust width and height as desired
+  print(p)
+  dev.off()  
+
+
+
+```
+
+Now we plot the clusters on UMAP and tissue
+
+Only the 9 top affected clusters are shown
+```{r}
+p <- DimPlot(object = spatial.data, group.by = "seurat_clusters", reduction = "umap_after_harmony", pt.size = 0.5, label = F, cols = cl.colors.affected, label.size = 12) + ggtitle("Most affected clusters from full 6OHDA dataset")
+ggsave(plot = p, filename = "/Users/yuvarani.masarapu/Documents/parkinsonss_figures_folder/UMAP_most_affected_clusters_6OHDA.pdf", height = 10, width = 12, dpi = 300)
+```
+
+```{r fig.height=16, fig.width=16}
+images <- c("slice1", "slice1.2", "slice1.2", "slice1.3", "slice1.4", "slice1.5", "slice1.6", "slice1.7", "slice1.8", "slice1.9", "slice1.10", "slice1.11",
+            "slice1.12", "slice1.13", "slice1.14", "slice1.15", "slice1.16", "slice1.17", "slice1.18", "slice1.19", "slice1.20", "slice1.21", "slice1.22", "slice1.23")
+samples <- unique(spatial.data$sample_id)
+names(cl.colors.affected) <- levels(spatial.data)
+
+for(i in 1:length(images)){
+  p <- SpatialPlot(object = spatial.data, pt.size.factor = 1, crop = FALSE, image.alpha = 0.8, label = TRUE, group.by = "seurat_clusters", images = images[i], cols = cl.colors.affected) + ggtitle(samples[i])
+ggsave(plot = p, filename = paste("/Users/yuvarani.masarapu/Documents/parkinsonss_figures_folder/most_affected_clusters/most_affected_clusters_", samples[i], ".pdf", sep = ""), dpi = 300, width = 8, height = 8)
+}
+```
