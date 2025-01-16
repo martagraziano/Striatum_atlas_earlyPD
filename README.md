@@ -61,7 +61,7 @@ The repository is organized as follows:
        - snRNA_seq/Human datasets/Analysis_full_dataset
        - snRNA_seq/Human datasets/Sub_clustering_SPNs_human
 
-- Spatial_Transcriptomics/: Code to analize and to generate figures and analyzing spatial transcriptomics datasets.
+- Spatial_Transcriptomics/: Code to analize and to generate figures of spatial transcriptomics datasets.
 
 - Trajectory_Inference/: R scripts for pseudotime and trajectory analyses.
 
