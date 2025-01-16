@@ -28,9 +28,9 @@ Process and visualize spatial transcriptomics (ST) data to map regional vulnerab
 
 Perform differential expression and pseudotime trajectory analyses for specific cell types, particularly focusing on astrocytes, oligodendrocytes, and spiny projection neurons (SPNs).
 
-Develop and apply computational models for trajectory inference and pseudotime analyses.
+Apply computational models for trajectory inference and pseudotime analyses.
 
-This repository was used in the study titled "Comprehensive Transcriptomic and Spatial Analysis of Striatal Cell States in Parkinson's Disease". It provides a valuable resource for investigating cell-type-specific and region-specific responses to dopamine depletion in both mouse models and human PD tissue.
+This repository was used in the study titled "A molecular atlas of cell types in the mouse and human parkinsonian striatum."
 ## System Requirements
 
 The code in this repository is designed to run on systems capable of supporting:
