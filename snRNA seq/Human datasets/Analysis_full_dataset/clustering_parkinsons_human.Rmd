@@ -212,16 +212,32 @@ s.genes <- intersect(s.genes, all.genes)
 
 seurat_rna <- CellCycleScoring(object = seurat_rna, assay = "RNA", g2m.features = g2m.genes, s.features = s.genes)
 
-rna.combined$Sample_group <- colnames(rna.combined)
+
 
 rna.combined$Sample_group[rna.combined$SampleID %in% c( "AA_ASAP117_PD_NP22-55_PUT", "AA_ASAP138_PD_NP16-285_PUT","AA_ASAP139_PD_NP17-232_PUT","AA_ASAP140_PD_NP19-91_PUT", "AA_ASAP144_PD_NP19-137_PUT",  "AA_ASAP146_PD_NP21-04_PUT", "AA_ASAP87_PD_NP21-208_PUT" , "AA_ASAP88_PD_NP21-217_PUT","AA_ASAP97_PD_NP21-57_PUT", "AA71_ASAP70_PD_NP18-304_PUT","AA73_ASAP65_PD_NP16-269_PUT",   "AA74_ASAP62_PD_NP16-140_PUT" ,  "AA76_ASAP74_PD_NP19-255_PUT" ,"AA77_ASAP61_PD_NP16-25_PUT","AA78_ASAP63_PD_NP16-160_PUT","AA79_ASAP64_PD_NP16-162_PUT","AA80_ASAP66_PD_NP17-94_PUT",  "AA81_ASAP67_PD_NP17-191_PUT", "AA82_ASAP68_PD_NP18-117_PUT","AA83_ASAP69_PD_NP18-287_PUT", "AA84_ASAP71_PD_NP19-16_PUT" , "AA85_ASAP72_PD_NP19-23_PUT","AA86_ASAP73_PD_NP19-108_PUT","Seq176_1", "Seq176_10"   ,"Seq176_11" ,"Seq176_12","Seq176_13" , "Seq176_14","Seq176_2","Seq176_3","Seq176_4","Seq176_5","Seq176_6" , "Seq176_7","Seq176_8", "Seq176_9"  )] <- "PD"
 rna.combined$Sample_group[rna.combined$SampleID %in% c("AA_ASAP100_ctrl_NP18-148_PUT","AA_ASAP141_ctrl_NP19-218_PUT","AA_ASAP142_ctrl_NP22-37_PUT","AA_ASAP143_ctrl_NP22-75_PUT", "AA_ASAP92_ctrl_NP16-284_PUT",  "AA_ASAP93_ctrl_NP16-293_PUT", "AA_ASAP94_ctrl_NP17-20_PUT" ,"AA_ASAP96_ctrl_NP18-46_PUT","AA_ASAP98_ctrl_NP16-119_PUT" ,"AA87_ASAP76_ctrl_NP18-159_PUT", "AA88_ASAP77_ctrl_NP19-36_PUT","AA89_ASAP78_ctrl_NP19-37_PUT" ,"Seq176_15", "Seq176_16","Seq176_17" )] <- "Control"
 
-                                                 
+duplicates<- c("Seq176_1", "Seq176_10"   ,"Seq176_11" ,"Seq176_12","Seq176_13" , "Seq176_14","Seq176_2","Seq176_3","Seq176_4","Seq176_5","Seq176_6" , "Seq176_7","Seq176_8", "Seq176_9","Seq176_15", "Seq176_16","Seq176_17","AA_ASAP143_ctrl_NP22-75_PUT")                                               
 
 saveRDS(seurat_rna, file = "Z:/dmclab/Marta/PD/snRNA human putamen/data/raw_combined_snRNAseq_2.rds")
 
+seurat_rna<- readRDS("Z:/dmclab/Marta/PD/snRNA human putamen/data/raw_combined_snRNAseq_2.rds")
 
+seurat_rna[['rna']] = seurat_rna[['RNA']]
+seurat_rna[["RNA"]] <- as(object = seurat_rna[["rna"]], Class = "Assay")
+seurat_rna[['rna']] = NULL
+
+
+seurat_rna<-subset(seurat_rna, SampleID %in% duplicates,invert = TRUE)
+
+seurat_rna$Sample_group <- colnames(seurat_rna)
+
+
+# Dynamically assign groups based on substrings in SampleID
+seurat_rna$Sample_group[grepl("ctrl", seurat_rna$SampleID, ignore.case = TRUE)] <- "Control"
+seurat_rna$Sample_group[grepl("PD", seurat_rna$SampleID, ignore.case = TRUE)] <- "PD"
+
+length(unique(seurat_rna$SampleID))
 
 ```
 
@@ -229,25 +245,25 @@ Let's check the size of data (nuclei count) for each sample
 
 ```{r data_size_plots, warning=FALSE, message=FALSE, fig.height=4, fig.width=4}
 
-plot_directory<- "Z:/dmclab/Marta/PD/snRNA human putamen/plots_2"
+plot_directory<- "Z:/dmclab/Marta/PD/snRNA human putamen/new_allen_withouteplicates" 
 
-dir.create(plot_directory)
-df <- as.data.frame(table(rna.combined$SampleID))
+dir.create(plot_directory) 
+df <- as.data.frame(table(seurat_rna$SampleID))
 colnames(df) <- c('Sample', 'n_cells')
+# Create a new column for the bar colors based on the Sample column
+df$bar_color <- ifelse(grepl("ctrl", df$Sample), "gray", "#be7b7e")
 
-# bar plot of the number of cells in each sample
-p <- ggplot(df, aes(y=n_cells, x=reorder(Sample, Sample), fill=Sample_group)) +
-  geom_bar(stat='identity') +
+# Plot with dynamic colors
+p <- ggplot(df, aes(y = n_cells, x = reorder(Sample, Sample), fill = bar_color)) +
+  geom_bar(stat = 'identity') +
   geom_text(aes(label = n_cells), vjust = 1.5, colour = "black") +
-  scale_y_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_fill_identity() + # Use the colors directly from the dataset
   NoLegend() + RotatedAxis() +
   ylab(expression(italic(N)[cells])) + xlab('Sample Name') +
   ggtitle(paste('Total cells:', sum(df$n_cells))) +
-  theme(
-    panel.grid.minor=element_blank(),
-    panel.grid.major.y=element_line(colour="lightgray", size=0.5),
-  )
-
+  theme_classic()+ 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
   
 plot_filename <- paste0(plot_directory, "/barplot_samples_beforefiltering_groupcol", ".pdf")
   pdf(plot_filename, width = 18, height = 8)  # Adjust width and height as desired
@@ -293,7 +309,7 @@ C <- seurat_rna[["RNA"]]$counts
 C <- Matrix::t(Matrix::t(C)/Matrix::colSums(C)) * 100
 saveRDS(C, file = "C_wS.rds")
 most_expressed <- order(apply(C, 1, median), decreasing = T)[20:1]
-saveRDS(most_expressed, file = "most_expressed_wS.rds")
+saveRDS(most_expressed, file = "most_expressed.rds")
 ```
 
 ```{r most_expressed_plot, warning=FALSE, message=FALSE, fig.height=5, fig.width=5, eval=FALSE}
@@ -384,6 +400,7 @@ X_Genes <- getBM(attributes = c("chromosome_name",  "hgnc_symbol"),
 genes_to_remove <- c("MALAT1", "XIST", "UTY", "TSIX", "DDX3Y", "DDX3X", "TBL1X", "USP9X", "JPX", "FTX", "TSNAX", "PCDH11X", "EIF2S3Y", "EIF2S3X", "TMSB4X", "TMSB4Y", "KDM5D")
 genes_to_remove<- rbind(genes_to_remove,Y_Genes$hgnc_symbol, X_Genes$hgnc_symbol )
 # Filter out genes from the Seurat object
+
 seurat_rna <- seurat_rna[!rownames(seurat_rna) %in% genes_to_remove, ]
 
 # Remove mitochondrial genes, 13 genes filtered out
@@ -395,6 +412,8 @@ seurat_rna <- seurat_rna[!grepl("^RPS|^RPL", rownames(seurat_rna)), ]
 
 # log10 of number of genes detected per UMI
 seurat_rna$log10GenesPerUMI <- log10(seurat_rna$nFeature_RNA) / log10(seurat_rna$nCount_RNA)
+
+
 ```
 
 ```{r data.table_filteing, message=FALSE, warning=FALSE}
@@ -526,10 +545,10 @@ seurat_rna <- seurat_rna[rowSums(seurat_rna) > 0, ]
 ### Y-axis with raw values
 
 ```{r violins_raw_after_filt, fig.height=4, fig.width=10}
-p1 <- VlnPlot(object = rna.combined, features = c("nFeature_RNA"), group.by = "Sample_group", 
+p1 <- VlnPlot(object = seurat_rna, features = c("nFeature_RNA"), group.by = "Sample_group", 
     pt.size = 0, log = F)
 
-p2 <- VlnPlot(object = rna.combined, features = c("nCount_RNA"), group.by = "Sample_group",
+p2 <- VlnPlot(object = seurat_rna, features = c("nCount_RNA"), group.by = "Sample_group",
     pt.size = 0, log = F)
 
 p1 <- p1 + theme(legend.position = "none")
@@ -545,7 +564,7 @@ p3<-cowplot::plot_grid(plotlist = list(p1,p2), nrow = 1, ncol = 2)
 ### Y-axis with log scale
 
 ```{r violins_log_after_filt, fig.height=4, fig.width=10}
-p1 <- VlnPlot(object = rna.combined, features = c("nFeature_RNA"), group.by = "Sample_group",fill.by = "Sample_group",
+p1 <- VlnPlot(object = seurat_rna, features = c("nFeature_RNA"), group.by = "Sample_group",fill.by = "Sample_group",
     pt.size = 0, log = T)
 
 p2 <- VlnPlot(object = seurat_rna, features = c("nCount_RNA"), group.by = "SampleID",
@@ -591,7 +610,7 @@ pANN_max <- 1
 for (x_name in names(seurat_rna)){
   
     x <- seurat_rna[[x_name]]
-
+    DefaultAssay(x)<- "RNA"
     VlnPlot(x, features = c("nFeature_RNA", "nCount_RNA", "percent_mt"), ncol = 3,
         log = T, pt.size = 0) + NoLegend()
     
@@ -626,21 +645,23 @@ for (x_name in names(seurat_rna)){
 
 rm(x)
 
+(x)
 
-for(i in 1:length(seurat_rna)){
-  seurat_rna[[i]] <- AddMetaData(
-  object = seurat_rna[[i]] ,
-  metadata = all_doublet_scores[colnames(seurat_rna[[i]])],
+for(i in 1:length(seurat_rna_list)){
+  seurat_rna_list[[i]] <- AddMetaData(
+  object = seurat_rna_list[[i]] ,
+  metadata = all_doublet_scores[colnames(seurat_rna_list[[i]])],
   col.name = 'pANN'
 )
 }
-saveRDS(seurat_rna_list, file = "seurat_rna_list_doublets.rds")
-gc()
-saveRDS(all_doublet_scores, file = "all_doublet_scores.rds")
 
-
-
-seurat_rna_list<- readRDS("seurat_rna_list_doublets.rds")
+# saveRDS(seurat_rna_list, file = "seurat_rna_list_doublets.rds")
+# gc()
+# saveRDS(all_doublet_scores, file = "all_doublet_scores.rds")
+# 
+# 
+# 
+# seurat_rna_list<- readRDS("seurat_rna_list_doublets.rds")
 ```
 
 Downstream processing
@@ -652,10 +673,10 @@ Downstream processing
 
 
 
-features <- SelectIntegrationFeatures(object.list = seurat_rna, nfeatures = 6000)
+features <- SelectIntegrationFeatures(object.list = seurat_rna_list, nfeatures = 6000)
 
 saveRDS(features, file = "Z:/dmclab/Marta/PD/snRNA human putamen/data/features_used.rds")
-seurat_rna_list <- PrepSCTIntegration(object.list = seurat_rna, anchor.features = features)
+seurat_rna_list <- PrepSCTIntegration(object.list = seurat_rna_list, anchor.features = features)
 
 
  
@@ -677,10 +698,9 @@ for (i in seq_along(seurat_rna_list)) {
 }
 #use the max index in the function
 rna.anchors <- FindIntegrationAnchors(object.list = seurat_rna_list, anchor.features = features, reference=max_index)
-saveRDS(rna.anchors, file = "Z:/dmclab/Marta/PD/snRNA human putamen/data/rna.anchors_human_wSiletti.rds")
-rm(rna.anchors)
+saveRDS(rna.anchors, file = "Z:/dmclab/Marta/PD/snRNA human putamen/data/rna.anchors_human_final.rds")
 rna.combined <- IntegrateData(anchorset = rna.anchors)
-saveRDS(rna.combined, file = "Z:/dmclab/Marta/PD/snRNA human putamen/data/rna.combined_snRNAseq_human_2.rds")
+saveRDS(rna.combined, file = "Z:/dmclab/Marta/PD/snRNA human putamen/data/rna.combined_snRNAseq_human_final.rds")
 
 
 
@@ -714,7 +734,18 @@ p2 <- DimPlot(object = rna.combined, group.by = "Sample_group", reduction = "uma
 p3 <- FeaturePlot(object = rna.combined, features = "nCount_SCT", reduction = "umap_before_harmony")
 p4 <- FeaturePlot(object = rna.combined, features = "nCount_RNA", reduction = "umap_before_harmony")
 
+p2 <- DimPlot(object = rna.combined,group.by="Sample_group", split.by="Sample_group", reduction = "umap_before_harmony",label=F, pt.size = 0.6, cols=c("#939291ff","#be7b7eff"), raster=FALSE)  + ggtitle("sample groups")
+  plot_filename <- paste0(plot_directory, "/umap_before_harmony__cols_split_def", ".pdf")
+  pdf(plot_filename, width = 16, height = 6)  # Adjust width and height as desired
+  print(p2)
+  dev.off()
+  
 (p1 - p2) / (p3 - p4)
+  
+    plot_filename <- paste0(plot_directory, "/umap_before_harmony", ".pdf")
+  pdf(plot_filename, width = 16, height = 6)  # Adjust width and height as desired
+  print((p1 - p2) / (p3 - p4))
+  dev.off()
 ```
 
 ###     Batch effects correction
@@ -743,11 +774,10 @@ rna.combined <- RunUMAP(object = rna.combined, assay.use = "SCT", reduction = "h
 ```{r after_batcheffects, fig.width=16, fig.height=14, fig.show='hold'}
 p1 <- DimPlot(object = rna.combined, group.by = "SampleID", reduction = "umap_after_harmony") + ggtitle("After batch correction (spots grouped by sample)")+ theme(legend.position = "none")
 
-p2 <- DimPlot(object = rna.combined, group.by = "Sample_group", reduction = "umap_after_harmony", alpha=0.6, cols=c("red","blue"))  + ggtitle("sample groups")
+p2 <- DimPlot(object = rna.combined, group.by = "Sample_group", reduction = "umap_after_harmony", cols=c("red","blue"))  + ggtitle("sample groups")
 p3 <- FeaturePlot(object = rna.combined, features = "nCount_SCT", reduction = "umap_after_harmony")
 p4 <- FeaturePlot(object = rna.combined, features = "nCount_RNA", reduction = "umap_after_harmony")
 
-plot_directory<-"Z:/dmclab/Marta/PD/snRNA human putamen/plots_2"
 p5<- (p1 - p2) / (p3 - p4)
   plot_filename <- paste0(plot_directory, "/After batch correction (spots grouped by sample)", ".pdf")
   pdf(plot_filename, width = 18, height = 18)  # Adjust width and height as desired
@@ -758,13 +788,12 @@ p5<- (p1 - p2) / (p3 - p4)
 ```{r after_batcheffects, fig.width=16, fig.height=14, fig.show='hold'}
 p1 <- DimPlot(object = rna.combined, group.by = "SampleID", reduction = "umap_after_harmony_2") + ggtitle("After batch correction (spots grouped by sample group)")+ theme(legend.position = "none")
 
-p2 <- DimPlot(object = rna.combined, group.by = "Sample_group", reduction = "umap_after_harmony_2", alpha=0.6, cols=c( "red","blue"))  + ggtitle("sample groups")
+p2 <- DimPlot(object = rna.combined, group.by = "Sample_group", reduction = "umap_after_harmony_2",  cols=c( "red","blue"))  + ggtitle("sample groups")
 
 p3 <- FeaturePlot(object = rna.combined, features = "nCount_SCT", reduction = "umap_after_harmony_2")
 p4 <- FeaturePlot(object = rna.combined, features = "nCount_RNA", reduction = "umap_after_harmony_2")
 
 
-plot_directory<-"Z:/dmclab/Marta/PD/snRNA human putamen/plots_2"
 p5<- (p1 - p2) / (p3 - p4)
   plot_filename <- paste0(plot_directory, "/After batch correction (spots grouped by  sample group)", ".pdf")
   pdf(plot_filename, width = 18, height = 18)  # Adjust width and height as desired
@@ -775,7 +804,7 @@ p5<- (p1 - p2) / (p3 - p4)
 ```{r after_batcheffects, fig.width=16, fig.height=14, fig.show='hold'}
 p1 <- DimPlot(object = rna.combined, group.by = "SampleID", reduction = "umap_after_harmony_3") + ggtitle("After batch correction (spots grouped by sample and sample group)") + theme(legend.position="none")
 
-p2 <- DimPlot(object = rna.combined, group.by = "Sample_group", reduction = "umap_after_harmony_3", alpha=0.6, cols=c( "red","blue"))  + ggtitle("sample groups")
+p2 <- DimPlot(object = rna.combined, group.by = "Sample_group", reduction = "umap_after_harmony_3", cols=c( "red","blue"))  + ggtitle("sample groups")
 
 p3 <- FeaturePlot(object = rna.combined, features = "nCount_SCT", reduction = "umap_after_harmony_3")
 p4 <- FeaturePlot(object = rna.combined, features = "nCount_RNA", reduction = "umap_after_harmony_3")
@@ -794,7 +823,7 @@ Reduction selected: harmony_sid_3, umap: umap_after_harmony_3
 
 PCs: 42
 
-Resulution :0.4
+Resulution :1.5
 
 ```{r eval=FALSE}
 #choose the reduction accondign to the one that fits best before running the next step, chosen umap_after_harmony_3
@@ -802,16 +831,32 @@ Resulution :0.4
 set.seed(61)
 rna.combined <- FindNeighbors(object = rna.combined, assay = "SCT", dims = 1:42, k.param = 23, graph.name = "graph_afterHarmony", reduction = "harmony_sid_3")
 
-rna.combined <- FindClusters(object = rna.combined, pc.use = 1:42, resolution = 0.4, save.SNN = T, do.sparse = T, graph.name = "graph_afterHarmony", random.seed = 13, group.singletons = TRUE)
+rna.combined <- FindClusters(object = rna.combined, pc.use = 1:42, resolution = 0.8, save.SNN = T, do.sparse = T, graph.name = "graph_afterHarmony", random.seed = 13, group.singletons = TRUE)
 
+
+#checktheplot
+
+p <-  DimPlot(
+  object = rna.combined,
+    group.by = "seurat_clusters",
+  reduction = "umap_after_harmony_3",
+  pt.size = 0.6,
+  label = TRUE,
+  label.size = 3
+) + 
+  ggtitle("Clusters in combined snRNAseq dataset 42 pc res 0.8") 
+plot_filename <- paste0(plot_directory, "/UMAP_first_42pc_res0.8", ".pdf")
+  pdf(plot_filename, width = 8, height = 6)  # Adjust width and height as desired
+  print(p)
+  dev.off()
 library(dplyr)
 wnn_markers <- FindAllMarkers(rna.combined, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.2, recorrect_umi = FALSE)
 wnn_markers <- wnn_markers[wnn_markers$p_val_adj < 0.05, ]
-write.csv(wnn_markers, file = "Z:/dmclab/Marta/PD/snRNA human putamen/cluster_markers-HUMAN_snRNA_42_res0.4_annotated.csv", col.names = TRUE, row.names = TRUE)
+write.csv(wnn_markers, file = "Z:/dmclab/Marta/PD/snRNA human putamen/new_allen_withouteplicates/cluster_markers-HUMAN_snRNA_42_res0.8_annotated.csv", col.names = TRUE, row.names = TRUE)
 
 
-wnn_markers<- read.csv("Z:/dmclab/Marta/PD/snRNA human putamen/cluster_markers-HUMAN_snRNA_42_res0.4_annotated.csv")
-rna.combined<- readRDS(  "Z:/dmclab/Marta/PD/snRNA human putamen/data/rna.combined_res0.4_annotated_2_clinicaldata.rds")
+wnn_markers<- read.csv("Z:/dmclab/Marta/PD/snRNA human putamen/new_allen_withouteplicates/cluster_markers-HUMAN_snRNA_42_res0.4_annotated.csv")
+rna.combined_all<- readRDS(  "Z:/dmclab/Marta/PD/snRNA human putamen/data/rna.combined.snRNA_seq_merged_42_res1.5_annotated_final.rds")
 
 
   
@@ -851,14 +896,15 @@ seurat.obj <- subset(rna.combined, features = common_genes)
 # Extract the normalized gene expression matrix (RNA assay)
 expression_matrix <- GetAssayData(seurat.obj, assay = "RNA", slot = "data")
 # Save the expression matrix
-write.csv(as.matrix(expression_matrix), "Z:/dmclab/Marta/PD\snRNA human putamen/expression_matrix.csv", row.names = TRUE)
+write.csv(as.matrix(expression_matrix), file="Z:/dmclab/Marta/PD/snRNA human putamen/new_allen_withouteplicates/expression_matrix.csv", row.names = TRUE)
 
 #generate .h5ad file on python with a custom script (see .py scrpt)
 
 #load results 
 
 # Step 1: Load the MapMyCells results
-mapmycells_results <- read.csv("Z:/dmclab/Marta/PD/snRNA human putamen/new_adata_for_MapMyCells_10xWholeHumanBrain.csv", row.names = 1)
+mapmycells_results <- read.csv("Z:/dmclab/Marta/PD/snRNA human putamen/new_allen_withouteplicates/new_adata_for_MapMyCells_10xWholeHumanBrain.csv", row.names = 1)
+
 
 # Step 2: Check alignment of cell names
 # Inspect Seurat object cell names
@@ -894,22 +940,17 @@ rna.combined@meta.data <- metadata
 # Inspect the updated metadata
 head(rna.combined@meta.data)
 
-
-plot_directory<- "Z:/dmclab/Marta/PD/snRNA human putamen/new_allen_clustering"
-
-dir.create(plot_directory)
-
-
-
 p <-  DimPlot(
   object = rna.combined,
-    group.by = "supertype_name",
+    group.by = "supercluster_name",
   reduction = "umap_after_harmony_3",
   pt.size = 0.6,
   label = TRUE,
   label.size = 3
 ) + 
   ggtitle("Clusters in combined snRNAseq dataset") 
+
+
   # theme(legend.position = "none")       # Adjust legend key size
 
 # Determine the number of clusters
@@ -930,30 +971,43 @@ p <- DimPlot(
   group.by = "supercluster_name",
   reduction = "umap_after_harmony_3",
   pt.size = 0.6,
-  label = TRUE,
-  label.size = 2
+  label = FALSE,
+  label.color = "black",
+  label.box = TRUE,
+  label.size = 2,cols=alpha(palette,0.5)
 ) + 
-  scale_color_manual(values = palette)+ 
-  ggtitle("Clusters in combined snRNAseq dataset") 
+ggtitle("Clusters in combined snRNAseq dataset") 
   # theme(legend.position = "none")       # Adjust legend key size
-
-plot_filename <- paste0(plot_directory, "/UMAP_ANNOTATED_pc42_res0.4_SIZED_supercluster_name_allen_legend", ".pdf")
+p1 <-  DimPlot(
+  object = rna.combined,
+    group.by = "seurat_clusters",
+  reduction = "umap_after_harmony_3",
+  pt.size = 0.6,
+  label = TRUE,
+  label.size = 3
+) + 
+  ggtitle("Clusters in combined snRNAseq dataset 42 pc res 1.5") 
+plot_filename <- paste0(plot_directory, "/UMAP_ANNOTATED_pc42_res1.5_supercluster_clusters_NOLABEL", ".pdf")
   #png(plot_filename, width = 1800, height = 600) 
-  pdf(plot_filename, width = 11, height = 8)  # Adjust width and height as desired
-  print(p)
+  pdf(plot_filename, width = 22, height = 8)  # Adjust width and height as desired
+  print((p+p1))
   dev.off()
+
 
 
 #refine cluser resolution
 set.seed(61)
+
+# Save the old clustering results
+rna.combined$clusters_res0.8 <- rna.combined$seurat_clusters
 rna.combined <- FindNeighbors(object = rna.combined, assay = "SCT", dims = 1:42, k.param = 23, graph.name = "graph_afterHarmony", reduction = "harmony_sid_3")
 
-rna.combined <- FindClusters(object = rna.combined, pc.use = 1:42, resolution = 0.4, save.SNN = T, do.sparse = T, graph.name = "graph_afterHarmony", random.seed = 13, group.singletons = TRUE)
+rna.combined <- FindClusters(object = rna.combined, pc.use = 1:42, resolution = 1.5, save.SNN = T, do.sparse = T, graph.name = "graph_afterHarmony", random.seed = 13, group.singletons = TRUE)
 
 library(dplyr)
 wnn_markers <- FindAllMarkers(rna.combined, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.2, recorrect_umi = FALSE)
 wnn_markers <- wnn_markers[wnn_markers$p_val_adj < 0.05, ]
-write.csv(wnn_markers, file = "Z:/dmclab/Marta/PD/snRNA human putamen/new_allen_clustering/cluster_markers-HUMAN_snRNA_42_res1_annotated.csv", col.names = TRUE, row.names = TRUE)
+write.csv(wnn_markers, file = "Z:/dmclab/Marta/PD/snRNA human putamen/new_allen_withouteplicates/cluster_markers-HUMAN_snRNA_42_res1.5_annotated.csv", col.names = TRUE, row.names = TRUE)
 
 
 
@@ -970,12 +1024,17 @@ for combined:umap_after_harmony_3
 
 #plot witht he correct reduction according to the batch correction selected
 
-plot_directory <- "Z:/dmclab/Marta/PD/snRNA human putamen/plots_2"
+#plot_directory <- "Z:/dmclab/Marta/PD/snRNA human putamen/plots_2"
 
 library(openxlsx)
 library(readxl)
 #add clinical data
 clinical_data<- read_xlsx("Z:/dmclab/Marta/PD/snRNA human putamen/clinical_data.xlsx")
+# Extract SampleIDs from the Seurat metadata
+valid_sample_ids <- unique(rna.combined@meta.data$SampleID)
+
+# Filter the data frame to keep only matching SampleIDs
+clinical_data <- clinical_data[clinical_data$SampleID %in% valid_sample_ids, ]
 
 ## Let's check UMAPs for these known markers
 
@@ -986,13 +1045,23 @@ p<-DimPlot(object = rna.combined, reduction = "umap_after_harmony_3", pt.size = 
 #check that the levels are actually in the order or Idents
 Idents(rna.combined)
 #annotation for combined dataset
+#delete old annotation
+Idents(rna.combined) <- rna.combined@meta.data$seurat_clusters
+new.cluster.ids<- c("Oligodendrocytes","Oligodendrocytes","Oligodendrocytes","Astrocytes","Oligodendrocytes","Astrocytes","COPs-Oligo","SPNs","OPCs","Oligodendrocytes","Microglia","Oligodendrocytes","Microglia","SPNs","Oligodendrocytes","Astrocytes","OPCs","Astrocytes","Microglia","SPNs","Astrocytes","INT Ache-Npy","eSPNs","Splatter","eSPNs","SPNs","Vascular", "Splatter","Microglia","Midbrain INH","Astrocytes","Upper Layer IT","INT Ache-Npy-Pvalb-SSt","Astrocytes")
 
-new.cluster.ids<- c("Oligodendrocytes","Oligodendrocytes","Astrocytes","MSNs","Microglia" ,"Astrocytes","OPCs","Oligodendrocytes","Interneurons","MSNs","Unclassified","MSNs","Unclassified","Oligodendrocytes","Unclassified","Astrocytes","Oligodendrocytes" ,"Microglia","MSNs")
+#old annotation
+# new.cluster.ids<- c("Oligodendrocytes","Oligodendrocytes","Astrocytes","MSNs","Microglia" ,"Astrocytes","OPCs","Oligodendrocytes","Interneurons","MSNs","Unclassified","MSNs","Unclassified","Oligodendrocytes","Unclassified","Astrocytes","Oligodendrocytes" ,"Microglia","MSNs")
 
 names(new.cluster.ids) <- levels(rna.combined)
 rna.combined <- RenameIdents(rna.combined, new.cluster.ids)
 # Extract the metadata from the Seurat object
 rna_metadata <- rna.combined@meta.data
+#RERUN THE CLUSTER MARKERS WITH ANNOTATIONS
+library(dplyr)
+wnn_markers <- FindAllMarkers(rna.combined, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.2, recorrect_umi = FALSE)
+wnn_markers <- wnn_markers[wnn_markers$p_val_adj < 0.05, ]
+write.csv(wnn_markers, file = "Z:/dmclab/Marta/PD/snRNA human putamen/new_allen_withouteplicates/cluster_markers-HUMAN_snRNA_42_res1.5_annotated_final.csv", col.names = TRUE, row.names = TRUE)
+
 
 # Create a subset of clinical_data that includes only relevant columns
 # Ensure clinical_data and rna_metadata have a common sample identifier
@@ -1014,7 +1083,7 @@ merged_metadata <- merge(rna_metadata, clinical_subset, by = "SampleID", all.x =
 rna.combined <- AddMetaData(rna.combined, metadata = merged_metadata)
 metadata <- rna.combined@meta.data
 #save annotated object 
-saveRDS(rna.combined, file = "Z:/dmclab/Marta/PD/snRNA human putamen/data/rna.combined.snRNA_seq_merged_42_res0.4_2_annotated.rds")
+saveRDS(rna.combined, file = "Z:/dmclab/Marta/PD/snRNA human putamen/data/rna.combined.snRNA_seq_merged_42_res1.5_annotated_final.rds")
 # Subset the metadata to include only SampleID, Sex, PMI, and Braak
 # Assuming SampleID is already part of the metadata
 extracted_table <- unique(metadata[, c("SampleID","Age", "Sample_group", "Sex", "PMI", "Braak")])
@@ -1043,7 +1112,7 @@ metadata_clean$PMI_group <- cut(metadata_clean$PMI,
 plot_sex <- ggplot(extracted_table, aes(x = Sample_group, fill = Sex)) +
   geom_bar(position = "dodge") +  # Use position_dodge to separate bars
   labs(x = "Sample Group", y = "Count") +
-  scale_y_continuous(limits=c(0,30), breaks = seq(0, 30, by = 4))+
+  scale_y_continuous(limits=c(0,20), breaks = seq(0, 20, by = 5))+
   theme_classic() +
   theme(axis.title.y = element_blank(),  # remove y-axis title
         axis.text.y = element_text(size = 10),  # keep y-axis text
@@ -1063,8 +1132,8 @@ plot_age<- ggboxplot(extracted_table, x = "Sample_group", y = "Age",fill="Sample
                      ) +
    ylim(0,100)+# Points for individual patients
   labs(x = "Sample ID", y = "Age", title = "Age of Patients by Group") +
-  scale_fill_manual(values=c("gray", "#b4b4daff"))+
-  scale_color_manual(values=c("gray", "#b4b4daff"))+
+  scale_fill_manual(values=c("gray", "#be7b7eff"))+
+  scale_color_manual(values=c("gray", "#be7b7eff"))+
   theme_classic() 
 
 # Change method
@@ -1076,37 +1145,33 @@ print(plot_age)
 dev.off()
   
 
-
-# PMI plot (without y-axis)
-plot_pmi <- ggplot(metadata_clean, aes(x = factor(1), y = SampleID, color = PMI_group)) +
-  geom_point(size = 3) +
-  labs(x = "PMI (grouped)") +
-  theme_minimal() +
-  theme(axis.title.y = element_blank(), axis.text.y = element_blank(), axis.ticks.y = element_blank())
-
 # Braak plot (show the number instead of a dot, without y-axis)
-plot_braak <- ggplot(metadata_clean, aes(x = factor(1), y = SampleID, label = Braak)) +
-  geom_text(size = 4) +
-  labs(x = "Braak Stage") +
-  theme_classic() +
-  theme(axis.title.y = element_blank(), axis.text.y = element_blank(), axis.ticks.y = element_blank())
+extracted_table$Braak <- factor(extracted_table$Braak)
 
-# Combine the three plots side by side using patchwork, keep the axis on the left
-combined_plot <- plot_sex +plot_pmi+ plot_braak + plot_layout(ncol = 4)
-# Print the combined plot
-print(combined_plot)
-plot_filename <- paste0(plot_directory, "/plot_braak", ".pdf")
-  #png(plot_filename, width = 600, height = 600) 
-pdf(plot_filename, width = 8, height = 8)  # Adjust width and height as desired
+plot_braak <- ggplot(extracted_table, aes(x = Braak, fill = Braak)) +  # Map fill to Braak
+  geom_bar(position = "dodge") +  # Use position_dodge to separate bars
+  labs(x = "Sample Group", y = "Count") +
+  scale_fill_manual(values = c("gray", "#be7b7eff", "#a34246ff", "#79090fff", "#330000")) +
+  theme_classic() +
+  theme(
+    axis.title.y = element_blank(),  # Remove y-axis title
+    axis.text.y = element_text(size = 10),  # Keep y-axis text
+    axis.ticks.y = element_line()  # Keep y-axis ticks
+  )
+
+# Save plot to PDF
+plot_filename <- paste0(plot_directory, "/plot_braak_sample_group.pdf")
+pdf(plot_filename, width = 3, height = 4)  # Adjust width and height as desired
 print(plot_braak)
 dev.off()
+
 
   
 #calculate average number of genes per cluster
 
 # Step 1: Extract the cluster information and gene expression matrix
-clusters <- Idents(rna.combined)            # Cluster identities for each cell
-gene_expression <- rna.combined@assays$RNA3@data  # Expression data matrix
+clusters <- Idents(rna.combined_all)            # Cluster identities for each cell
+gene_expression <- rna.combined_all@assays$RNA@data  # Expression data matrix
 
 # Step 2: Calculate the number of genes expressed per cell (non-zero count)
 genes_per_cell <- colSums(gene_expression > 0)
@@ -1118,7 +1183,17 @@ avg_genes_per_cluster <- tapply(genes_per_cell,clusters, mean)
 mean(avg_genes_per_cluster)
 mean(genes_per_cell)
 
+
+
+avg_cells_per_sample <- rna.combined_all@meta.data %>%
+  dplyr::group_by(SampleID) %>%
+  dplyr::summarise(avg_cells = n()) %>%
+  dplyr::pull(avg_cells) %>%
+  mean()
+
 cl.colors <-  c("#F5D3C8","#c29e93ff","#8d7d93ff","#558877ff","#5566aaff","#fccde5ff","#8d7d93ff","#484444ff","#856fa7ff","#b89a01ff","#5f070cff","#102c52ff","#b6deeaff","#481518ff")
+
+cl.colors<- c("#F5D3C8","#8d7d93ff","#c29e93ff","#5566aaff","#fccde5ff","#558877ff","#102c52ff","#856fa7ff","#484444ff","#5f070cff","#b6deeaff","#b89a01ff","#4a607eff")
 
 cl.colors <-  c("#e1e1e1ff","#e1e1e1ff","#8d7d93ff","#e1e1e1ff","#5566aaff","#e1e1e1ff","#e1e1e1ff","#e1e1e1ff","#e1e1e1ff","#e1e1e1ff","#e1e1e1ff","#e1e1e1ff","#e1e1e1ff","#e1e1e1ff")
    
@@ -1137,11 +1212,19 @@ plot_filename <- paste0(plot_directory, "/UMAP_40PC_RES0.4_HD_splitby_braak_samp
   pdf(plot_filename,width=24, height=12)  # Adjust width and height as desired
   print(p2)
   dev.off()
-  
-p2<-DimPlot(object = rna.combined,  reduction = "umap_after_harmony_3",pt.size = 0.5, label = F, label.size = 6, raster=FALSE ,  cols = cl.colors ) + ggtitle("Clusters in combined snRNAseq dataset") 
-plot_filename <- paste0(plot_directory, "/umap_DE_COLS", ".pdf")
+
+  cols<- c("#9a7c7aff","#4d6a6bff")
+    p2<-DimPlot(object = rna.combined, split.by ="Sex",group.by="Sex", reduction = "umap_after_harmony_3",pt.size = 0.4, label = F, label.size = 6, raster=FALSE) + ggtitle("Clusters in human snRNAseq dataset") +scale_color_manual(values = cols)
+plot_filename <- paste0(plot_directory, "/UMAP_40PC_RES0.4_HD_splitby_sex_sampleG", ".pdf")
   #png(plot_filename, width = 1800, height = 600) 
-  pdf(plot_filename, width = 11, height = 8)  # Adjust width and height as desired
+  pdf(plot_filename,width=22, height=8)  # Adjust width and height as desired
+  print(p2)
+  dev.off()
+
+p2<-DimPlot(object = rna.combined,  reduction = "umap_after_harmony_3",pt.size = 0.5, label = F, label.size = 6, raster=FALSE,split.by="Sample_group", cols= alpha(cl.colors,0.7) ) + ggtitle("Clusters in combined snRNAseq dataset") 
+plot_filename <- paste0(plot_directory, "/umap_r42pc_res1.5_COLS_split", ".pdf")
+  #png(plot_filename, width = 1800, height = 600) 
+  pdf(plot_filename, width = 20, height = 8)  # Adjust width and height as desired
   print(p2)
   dev.off()  
  
@@ -1232,7 +1315,7 @@ table_plot <- ggplot(table, aes(x = cluster, y = Freq, fill = cluster)) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),
         panel.grid = element_blank())
-plot_filename <- paste0(plot_directory, "/CELLS_PER_CLUSTER_RES0.4", ".pdf")
+plot_filename <- paste0(plot_directory, "/CELLS_PER_CLUSTER", ".pdf")
   #png(plot_filename, width = 600, height = 600) 
 pdf(plot_filename, width = 24, height = 8)  # Adjust width and height as desired
 print(U2)
@@ -1268,8 +1351,7 @@ write.csv(table2, file="Z:/dmclab/Marta/PD/snRNA human putamen/Nuclei_per_sample
 
 
 markers<-c("MBP","TNC","CX3CR1","SLC1A3","SOX10","PDGFRA","GFAP","ALDH1L1","SLC17A7","SLC17A6" ,"SLC32A1","GAD2","SST","NPY","PVALB", "CHAT", "ACHE","SLC18A3","GPR6","PPP1R1B","RGS9" ,"GPR88","ADORA2A","DRD2","PENK","PDYN","TAC1","DRD1","COL11A1","SEMA5B","OPRM1","TH")
-d1_markers<- c("Gpr149", "Fam155a", "Syt6", "Neto2", "Rgs20", "Homer1", "Kcnj3", "Drd3", "Kremen1", "Egr1", "Lrrk2", "Tshz1", "Nr4a1")
-st_markers<- c("Calb1","Cck","Ptgds","Enpp2", "Lars2","Cldn11","Arc", "Egr1","Avp","Col11a1","Tac1","Rgs2","Bc1","Pde7b","Otof","Nts")
+markers_FIG<-c("MBP","SOX10","CX3CR1","SLC1A3","ALDH1L1","PDGFRA","SLC17A7","GAD2","PPP1R1B","RGS9","GPR88","DRD2","ADORA2A","DRD1","TAC1","COL11A1","SEMA5B","NPY","PVALB")
 
 
 ```
@@ -1286,7 +1368,27 @@ top5_2<-df_filtered %>%
     print(n = 1000)
 
 
+# Define your custom order for the clusters
+custom_order <-c("Oligodendrocytes","COPs-Oligo","OPCs","Astrocytes","Microglia" ,"SPNs","eSPNs", "Upper Layer IT" , "Midbrain INH","INT Ache-Npy","INT Ache-Npy-Pvalb-SSt","Vascular", "Splatter")
 d3<-DotPlot(rna.combined, features =rev(unique(top5_2$gene))) +
+  scale_colour_gradientn(colours =rev(c("white","gray", "#B34B50", "#5F070C","#240705") )%>% rev()) + labs(y = "cluster")+
+   theme(axis.text.x = element_text(angle = 90, vjust = 0.8, hjust=-0.3))+
+  scale_x_discrete(position = "bottom") +
+  scale_y_discrete(limits = custom_order)+
+  theme(axis.text = element_text(family = "sans", size = 7),
+        axis.title = element_text(family = "sans", size = 10),
+        legend.key.size = unit(5, units = "mm"),
+        legend.text = element_text(family = "sans", size = 7),
+        legend.title = element_text(family = "sans", size = 10))+
+ scale_size(range = c(1,8))+
+  coord_flip()
+plot_filename <- paste0(plot_directory, "/top_markers_annotated_fig", ".pdf")
+  #png(plot_filename, width = 600, height = 600) 
+pdf(plot_filename,width=6, height = 17) # Adjust width and height as desired
+print(d3)
+dev.off()
+
+d3<-DotPlot(rna.combined, features =rev(unique(markers))) +
   scale_colour_gradientn(colours =rev(c("white","gray", "#B34B50", "#5F070C","#240705") )%>% rev()) + labs(y = "cluster")+
    theme(axis.text.x = element_text(angle = 90, vjust = 0.8, hjust=-0.3))+
   scale_x_discrete(position = "bottom") +
@@ -1296,21 +1398,21 @@ d3<-DotPlot(rna.combined, features =rev(unique(top5_2$gene))) +
         legend.key.size = unit(5, units = "mm"),
         legend.text = element_text(family = "sans", size = 7),
         legend.title = element_text(family = "sans", size = 10))+
- scale_size(range = c(1,8))+
-  coord_flip()
-plot_filename <- paste0(plot_directory, "/top_markers_annotated_res1", ".pdf")
+ scale_size(range = c(1,8))
+  #coord_flip()
+plot_filename <- paste0(plot_directory, "/top_markers_not_our_annotated_res1.5", ".pdf")
   #png(plot_filename, width = 600, height = 600) 
-pdf(plot_filename,width=6, height = 15) # Adjust width and height as desired
+pdf(plot_filename,width=10, height = 6) # Adjust width and height as desired
 print(d3)
 dev.off()
 
 
 
 
-lapply(unique(mrk), function(gene){
+lapply(unique(markers), function(gene){
   tryCatch({
     myplot <- FeaturePlot(rna.combined, features = gene, reduction = "umap_after_harmony_3", slot = "data", split.by="Sample_group", pt.size=0.6,
-                          label=TRUE, raster=FALSE) & 
+                          label=FALSE, raster=FALSE) & 
                           theme(legend.position = "right") &
                           #scale_color_gradientn(colors = c("gray","#60795bff", "#354332ff"), limits=c(0,3))
                           scale_color_gradientn(colors = c("gray","#B34B50", "#5F070C","#240705"),limits=c(0,3))
@@ -1333,8 +1435,6 @@ lapply(unique(mrk), function(gene){
 ```
 
 
-
-
 ### Cluster markers on UMAP
 
 # Annotations using known markers list
@@ -1345,53 +1445,6 @@ lapply(unique(mrk), function(gene){
 ```{r eval=FALSE}
 #load combined
 rna.combined<- readRDS("Z:/dmclab/Marta/PD/snRNA human putamen/data/rna.combined_res1_annotated_allen_clinicaldata.rds")
-
-```
-
-```{r dotplot_markers_manual, warning=FALSE, message=FALSE, verbose=FALSE, fig.width=12, fig.height= 10}
-DefaultAssay(rna.combined) <- "SCT"
-
-rna.combined <- ValidateClusters(rna.combined, pc.use = 1:42, top.genes = 60)
-
-pbmc <- BuildClusterTree(pbmc, 
-                         do.reorder = T, 
-                         reorder.numeric = T)
-
-combined_averages <- AverageExpression(rna.combined, return.seurat = TRUE) 
-
-
-
-HEATMAP<- DoHeatmap(
-  combined_averages,
-  features =unique(top5_2$gene),
-  cells =NULL ,
-  group.by = "ident",
-  group.bar = TRUE,
-   group.colors = cl.colors,
-  disp.min = -2.5,
-  disp.max = 6,
-  slot="data",
-  assay="SCT",
-  label = TRUE,
-  size = 3,
-  hjust = 0,
-  angle = 45,
-  raster = FALSE,
-  draw.lines = FALSE,
-  lines.width = NULL,
-  group.bar.height = 0.02,
-  combine = TRUE
-) + scale_fill_gradientn(colors = c("white","#B34B50", "#5F070C","#240705"))
-
-HEATMAP<-HEATMAP + theme(
-  axis.text = element_text(size = 5),  # Change the size of tick labels
-  axis.title = element_text(size = 6)  # Change the size of axis titles
-)
-plot_filename <- paste0(plot_directory, "/heatmap_top10", ".pdf")
-  #png(plot_filename, width = 600, height = 600) 
-  pdf(plot_filename, width = 8, height = 13)  # Adjust width and height as desired
-  print(HEATMAP)
-  dev.off()
 
 ```
 
@@ -1420,75 +1473,60 @@ file: mitopark-KO_wt_DEGs-cluster_2023-09-05.xlsx
 ```{r message=FALSE, warning=FALSE}
 
 # convert a v5 assay to a v3 assay
-rna.combined[["RNA3"]] <- as(object = rna.combined[["RNA"]], Class = "Assay")
-DefaultAssay(rna.combined) <- "RNA3"
+#rna.combined[["RNA3"]] <- as(object = rna.combined[["RNA"]], Class = "Assay")
+DefaultAssay(rna.combined) <- "RNA"
 
 rna.combined <- NormalizeData(rna.combined)
+use_clusters <- rna.combined@active.ident
+all_clusters <- as.character(sort(levels(unique(use_clusters))))
+
 
 
 options(digits=15)
-nuclei_count <-as.data.frame(table("cluster" = rna.combined@active.ident, rna.combined@meta.data$Braak))
-
-#check the total number of cells in cluster and each sample
-#dE FOR BRAAK STAGES 
-de_genes_braak<- list()
-cl_names <- c()
-for (cl in 1:length(all_clusters)) {
-    print(all_clusters[cl])
-    Braak_4 <- colnames(rna.combined)[rna.combined@active.ident %in% all_clusters[cl] & rna.combined$Braak %in% "4"]
-    Braak_6 <- colnames(rna.combined)[rna.combined@active.ident %in% all_clusters[cl] & rna.combined$Braak %in% "6"]
-
-    if (length(Braak_4) < 3 | length(Braak_6) < 3){
-        print("test")
-        next
-    }
-    
-    # # Randomly shuffle ground_cells before each random selection
-    # shuffled_ct_cells <- sample(ct_cells)
-    # 
-    # # Randomly select the same number of cells from shuffled ground_cells as in         flight_cells, repeating it multiple times
-    num_cells_to_select_b6 <- length(Braak_6)
-    selected_braak4_cells <- sample(Braak_4,num_cells_to_select_b6)
-    # 
-    de_genes_braak[[cl]] <- FindMarkers(rna.combined[["RNA3"]], slot = "data", cells.1 = selected_braak4_cells, cells.2 = Braak_6, test.use = "MAST", latent.vars = "SampleID", min.pct = 0.05, logfc.threshold = 0.2, features = NULL)
-
-    de_genes_braak[[cl]]$Gene <- rownames(de_genes_braak[[cl]])
-    
-    cl_names <- union(cl_names, all_clusters[cl])
-}
-names(de_genes_braak) <- cl_names
-library(openxlsx)
-write.xlsx(de_genes_braak, file = "Z:/dmclab/Marta/PD/snRNA human putamen/Braak4vs_Braak6_DEGs-cluster_res04_2.xlsx")
+nuclei_count <-as.data.frame(table("cluster" = rna.combined@active.ident, rna.combined@meta.data$Sample_group))
 
 #check the total number of cells in cluster and each sample
 
 cl_names <- c()
+de_genes<- list()
 for (cl in 1:length(all_clusters)) {
     print(all_clusters[cl])
-    treated_cells <- colnames(rna.combined)[rna.combined@active.ident %in% all_clusters[cl] & rna.combined$Sample_group %in% "PD"]
-    ct_cells <- colnames(rna.combined)[rna.combined@active.ident %in% all_clusters[cl] & rna.combined$Sample_group %in% "Control"]
+    tr_cells <- colnames(rna.combined)[rna.combined@active.ident %in% all_clusters[cl] & rna.combined$Sample_group %in% "PD"]
+    Ctrl_cells <- colnames(rna.combined)[rna.combined@active.ident %in% all_clusters[cl] & rna.combined$Sample_group %in% "Control"]
 
-    if (length(treated_cells) < 3 | length(ct_cells) < 3){
+   
+     if (length(tr_cells) < 3 | length(Ctrl_cells) < 3){
         print("test")
         next
     }
-    
-    # # Randomly shuffle ground_cells before each random selection
-    # shuffled_ct_cells <- sample(ct_cells)
-    # 
-    # # Randomly select the same number of cells from shuffled ground_cells as in         flight_cells, repeating it multiple times
-    num_cells_to_select <- length(ct_cells)
-    selected_treated_cells <- sample(treated_cells,num_cells_to_select)
-    # 
-    de_genes[[cl]] <- FindMarkers(rna.combined[["RNA"]], slot = "data", cells.1 = selected_treated_cells, cells.2 = ct_cells, test.use = "MAST", latent.vars = "SampleID", min.pct = 0.05, logfc.threshold = 0.2, features = NULL)
 
+    length_ct<- length(Ctrl_cells)
+    length_tr<- length(tr_cells)
+    
+    if (length_ct > length_tr){
+      
+    num_cells_to_select <- length(tr_cells)
+    selected_ct_cells <- sample(Ctrl_cells,num_cells_to_select)
+    # 
+    de_genes[[cl]] <- FindMarkers(rna.combined[["RNA"]], slot = "data", cells.1 = tr_cells, cells.2 = selected_ct_cells, test.use = "MAST", latent.vars = "SampleID", min.pct = 0.05, logfc.threshold = 0.2,            features = NULL)
+      
+    }else{
+    
+      #Randomly select the same number of cells from shuffled bigger group so to have the same number of cells in the conditions
+    num_cells_to_select <- length(Ctrl_cells)
+    selected_tr_cells <- sample(tr_cells,num_cells_to_select)
+    # 
+    de_genes[[cl]] <- FindMarkers(rna.combined[["RNA"]], slot = "data", cells.1 = selected_tr_cells, cells.2 = Ctrl_cells, test.use = "MAST", latent.vars = "SampleID", min.pct = 0.05, logfc.threshold = 0.2,      features = NULL)
+    }
+    
     de_genes[[cl]]$Gene <- rownames(de_genes[[cl]])
     
     cl_names <- union(cl_names, all_clusters[cl])
 }
-names(de_genes) <- cl_names
+
+names(de_genes) <- unique(all_clusters)
 library(openxlsx)
-write.xlsx(de_genes, file = "Z:/dmclab/Marta/PD/snRNA human putamen/PD_vs_wt_DEGs-cluster_res04_2.xlsx")
+write.xlsx(de_genes, file = "Z:/dmclab/Marta/PD/snRNA human putamen/new_allen_withouteplicates/PD_vs_wt_DEGs-cluster_res15_ann.xlsx")
 # Specify the file path of your Excel workbook
 install.packages("readxl")
 library(readxl)
@@ -1539,7 +1577,7 @@ de<-rbind(de_down, de_up)
 table(rna.combined@active.ident)
 cluster.set <- unique(rna.combined$nFeature_RNA)
 
-
+cluster<- unique(de$cluster)
 clusters<- unique(rna.combined@active.ident)
 clusters<- as.character(clusters)
 
@@ -1554,18 +1592,7 @@ de_merge<-transform(de_merge, norm = Freq / total_genes)
 
 table_gene_count<- data.frame()
 DefaultAssay(rna.combined) <- "RNA" 
-for (clust in clusters){
-   #subset<- subset(rna.combined, Sample_group %in% c("Control", "PD"))
-   subset_cl<- subset(rna.combined,  idents =clust)
-   print(clust)
-   keep_rows <- rowSums(subset_cl) > 0
-   subset_cluster <- subset_cl[keep_rows, ]
-   gene_count<- length(rownames(subset_cluster))
-   cluster<- clust
-   gene_counts_df<- as.data.frame(gene_count, cluster)
-   table_gene_count<- rbind(table_gene_count,gene_counts_df )
-   
- }
+
 
 table_gene_count <- data.frame()
 
@@ -1637,7 +1664,7 @@ de_merge$colors <- c(rep("grey", 7), blues)
 
 
 cl.colors.affected <- c("grey", "grey" , "#07519cff" ,"#3c8cc3ff","#08306bff","grey","grey","grey","#c6dbefff","#6baed6ff","grey","grey","grey","grey")  #manually select colors ordered like the clusters in the umap
-
+cl.colors.affected<- c("#6baed6ff","#08306bff","grey","#07519cff", "#c6dbefff","#3c8cc3ff","grey","grey","grey","grey","grey","grey","grey")
 p <- DimPlot(object = rna.combined, reduction = "umap_after_harmony_3", pt.size = 0.6, label = F, cols =alpha(cl.colors.affected,1) ,raster=FALSE, label.size = 12) + ggtitle("Most affected clusters from human dataset")
 
 plot_filename <- paste0(plot_directory, "/umap_de_norm", ".pdf")
@@ -1668,12 +1695,11 @@ plot_filename <- paste0(plot_directory, "/venn_diag", ".pdf")
   dev.off()
   
   
-plot_directory <- "Z:/dmclab/Marta/PD/snRNA human putamen/plots_2/VolcanoPlots"
 
-# Create the directory if it doesn't exist
-dir.create(plot_directory, showWarnings = FALSE)
 
-clusters <- unique(Idents(rna.combined_sub))
+
+
+clusters <- unique(Idents(rna.combined))
 #clusters<- c("striatum D1","Striatum D2" )
 for (clust in clusters) {
   subset_data_human <- de_genes[[clust]]
@@ -1744,7 +1770,7 @@ keyvals <- ifelse(
 clusters<- unique(de$cluster)
 for (clust in clusters){
   df1<- subset(de, cluster== clust)
-  #df1<- subset(de, cluster!= "Unclassified")
+  #df1<- subset(de, cluster!= "Splatter")
   m1_forplots<- df1[!grepl("^GM", df1$Gene) & !grepl("RIK$", df1$Gene)  & !grepl("PTGDS", df1$Gene) & !grepl("^AC", df1$Gene) & !grepl("^AP", df1$Gene)  & !grepl("^AL", df1$Gene),]
 
 most_negative <- m1_forplots[order(unique(m1_forplots$avg_log2FC)), ][1:15, ]
@@ -1754,10 +1780,10 @@ most_positive <- m1_forplots[order(unique(-m1_forplots$avg_log2FC)), ][1:15, ]
 result <- rbind(most_negative, most_positive)
 result<- na.omit(result)
 
-# Calculate the number of elements in each cluster
-  cluster_counts <- result %>%
-    count(cluster) %>%
-    arrange(desc(n))
+# # Calculate the number of elements in each cluster
+#   cluster_counts <- result %>%
+#     count(cluster) %>%
+#     arrange(desc(n))
   
   # Reorder clusters based on the number of elements
   result <- result %>%
@@ -1769,7 +1795,7 @@ plot<-ggplot(result, aes( cluster, reorder(Gene, -avg_log2FC),fill= avg_log2FC))
     low = '#31869bff', 
     mid = 'white',
     high = '#963634ff', 
-    midpoint = 0,limits = c(-4, 4), oob = scales::squish 
+    midpoint = 0,limits = c(-2, 2), oob = scales::squish 
   ) +
   #facet_wrap(.~cluster, scales = "fixed", drop=TRUE)+
        theme_classic()+
@@ -1780,29 +1806,35 @@ plot<-ggplot(result, aes( cluster, reorder(Gene, -avg_log2FC),fill= avg_log2FC))
     )+
   coord_flip()+
  ggtitle(paste("Most significantly changed genes")) 
- plot_filename <- paste0(plot_directory, "/Most_sign_genes_braak4vs6_",clust,".pdf")
+ plot_filename <- paste0(plot_directory, "/Most_sign_genes_",clust,".pdf")
   pdf(plot_filename, width = 14, height = 4)   # Adjust width and height as desired
   print(plot)
   dev.off()  
 
-  result$color_category <- ifelse(result$avg_log2FC > 0, "above_zero", "below_zero")
 
-plot1 <- ggplot(result, aes(avg_log2FC, reorder(Gene, -avg_log2FC), color = color_category)) +
-  geom_point(size = 4) +
-  scale_color_manual(values = c("below_zero" = '#31869bff', "above_zero" = '#963634ff')) +
-  scale_x_continuous(breaks = seq(-4, 4, by = 1), limits = c(-4, 4)) +
-  geom_vline(xintercept = 0, linetype = "dotted", color = "black") +
-  theme_classic() +
-  theme(
-    axis.text.x = element_text(angle = 45, vjust = 0.5, hjust = 0, size = 10),
-    axis.text.y = element_text(size = 12),
-    axis.title.y = element_blank()
+
+plot<-ggplot(result, aes(reorder(Gene, -avg_log2FC),avg_log2FC, fill= avg_log2FC))+
+       geom_bar(stat="identity", width=0.7)+
+        scale_fill_gradient2(
+    low = '#31869bff', 
+    mid = 'white',
+    high = '#963634ff', 
+    midpoint = 0,limits = c(-1, 1), oob = scales::squish 
   ) +
-  ggtitle(paste("Most significantly changed genes "))
-    
-  plot_filename <- paste0(plot_directory, "/Most_sign_genes_dot_braak4vs6_",clust,".pdf")
-  pdf(plot_filename, width = 4, height = 8)   # Adjust width and height as desired
-  print(plot1)
+  ylim(-2,2)+
+  #facet_wrap(.~cluster, scales = "fixed", drop=TRUE)+
+       theme_classic()+
+  theme(
+      axis.text.x = element_text( angle=0, vjust = 0.5, hjust = 0, size=10),
+      axis.text.y = element_text(size = 12),
+      axis.title.y = element_blank()
+    )+
+  coord_flip()+
+ ggtitle(paste("Most significantly changed genes")) 
+clust <- gsub("/", "_", clust)
+ plot_filename <- paste0(plot_directory, "/Most_sign_genes_bar_",clust,".pdf")
+  pdf(plot_filename, width = 5, height = 4)   # Adjust width and height as desired
+  print(plot)
   dev.off()  
   
 }

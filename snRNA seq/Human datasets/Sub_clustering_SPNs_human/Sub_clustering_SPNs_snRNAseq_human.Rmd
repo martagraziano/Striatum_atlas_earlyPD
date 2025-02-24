@@ -427,35 +427,61 @@ s.genes <- intersect(s.genes, all.genes)
 
 seurat_rna <- CellCycleScoring(object = seurat_rna, assay = "RNA", g2m.features = g2m.genes, s.features = s.genes)
 
+
 seurat_rna$Sample_group <- colnames(seurat_rna)
 
-seurat_rna$Sample_group[seurat_rna$SampleID %in% c( "AA_ASAP117_PD_NP22-55_PUT", "AA_ASAP138_PD_NP16-285_PUT","AA_ASAP139_PD_NP17-232_PUT","AA_ASAP140_PD_NP19-91_PUT", "AA_ASAP144_PD_NP19-137_PUT",  "AA_ASAP146_PD_NP21-04_PUT","AA_ASAP149_PD_NP23-21_PUT", "AA_ASAP87_PD_NP21-208_PUT" , "AA_ASAP88_PD_NP21-217_PUT","AA_ASAP97_PD_NP21-57_PUT", "AA71_ASAP70_PD_NP18-304_PUT","AA73_ASAP65_PD_NP16-269_PUT",   "AA74_ASAP62_PD_NP16-140_PUT" ,  "AA76_ASAP74_PD_NP19-255_PUT" ,"AA77_ASAP61_PD_NP16-25_PUT","AA78_ASAP63_PD_NP16-160_PUT","AA79_ASAP64_PD_NP16-162_PUT","AA80_ASAP66_PD_NP17-94_PUT",  "AA81_ASAP67_PD_NP17-191_PUT", "AA82_ASAP68_PD_NP18-117_PUT","AA83_ASAP69_PD_NP18-287_PUT", "AA84_ASAP71_PD_NP19-16_PUT" , "AA85_ASAP72_PD_NP19-23_PUT","AA86_ASAP73_PD_NP19-108_PUT","Seq176_1", "Seq176_10"   ,"Seq176_11" ,"Seq176_12","Seq176_13" , "Seq176_14","Seq176_2","Seq176_3","Seq176_4","Seq176_5","Seq176_6" , "Seq176_7","Seq176_8", "Seq176_9"  )] <- "PD"
-seurat_rna$Sample_group[seurat_rna$SampleID %in% c("AA_ASAP100_ctrl_NP18-148_PUT","AA_ASAP141_ctrl_NP19-218_PUT","AA_ASAP142_ctrl_NP22-37_PUT","AA_ASAP143_ctrl_NP22-75_PUT", "AA_ASAP92_ctrl_NP16-284_PUT",  "AA_ASAP93_ctrl_NP16-293_PUT", "AA_ASAP94_ctrl_NP17-20_PUT" ,"AA_ASAP95_ctrl_NP17-216_PUT","AA_ASAP96_ctrl_NP18-46_PUT","AA_ASAP98_ctrl_NP16-119_PUT" ,"AA87_ASAP76_ctrl_NP18-159_PUT", "AA88_ASAP77_ctrl_NP19-36_PUT","AA89_ASAP78_ctrl_NP19-37_PUT" ,"Seq176_15", "Seq176_16","Seq176_17" )] <- "Control"
 
-                                                 
+# Dynamically assign groups based on substrings in SampleID
+seurat_rna$Sample_group[grepl("ctrl", seurat_rna$SampleID, ignore.case = TRUE)] <- "Control"
+seurat_rna$Sample_group[grepl("PD", seurat_rna$SampleID, ignore.case = TRUE)] <- "PD"
 
-saveRDS(seurat_rna, file = "Z:/dmclab/Marta/PD/snRNA human putamen/data/raw_combined_snRNAseq_full_dataset.rds")
-#seurat_rna<- readRDS("Z:/dmclab/Marta/PD/snRNA human putamen/data/raw_combined_snRNAseq.rds")
+
+seurat_rna<- readRDS("Z:/dmclab/Marta/PD/snRNA human putamen/data/raw_combined_snRNAseq_2.rds")
+
+duplicates<- c("Seq176_1", "Seq176_10"   ,"Seq176_11" ,"Seq176_12","Seq176_13" , "Seq176_14","Seq176_2","Seq176_3","Seq176_4","Seq176_5","Seq176_6" , "Seq176_7","Seq176_8", "Seq176_9","Seq176_15", "Seq176_16","Seq176_17","AA_ASAP143_ctrl_NP22-75_PUT")   
+
+seurat_rna<-subset(seurat_rna, SampleID %in% duplicates,invert = TRUE) 
+# 
+ seurat_rna[["RNA3"]] <- as(object = seurat_rna[["RNA"]], Class = "Assay")
+# 
+# 
+# seurat_rna[['rna']] = seurat_rna[['RNA']]
+# 
+# seurat_rna[['RNA']] = seurat_rna[['RNA3']]
+# seurat_rna[['RNA3']] = NULL
+# 
+# 
+ DefaultAssay(seurat_rna)<- "RNA3"
+
+unique(seurat_rna$SampleID)
+
+
+plot_directory<- "Z:/dmclab/Marta/PD/snRNA human putamen/new_allen_withouteplicates"
+
+
 
 # use table function to get the number of cells in each Sample as a dataframe
 df <- as.data.frame(rev(table(seurat_rna$SampleID)))
 colnames(df) <- c('Sample', 'n_cells')
+# Create a new column for the bar colors based on the Sample column
+df$bar_color <- ifelse(grepl("ctrl", df$Sample), "gray", "#be7b7e")
 
-# bar plot of the number of cells in each sample
-p <- ggplot(df, aes(y=n_cells, x=reorder(Sample, Sample), fill=Sample)) +
-  geom_bar(stat='identity') +
+# Plot with dynamic colors
+p <- ggplot(df, aes(y = n_cells, x = reorder(Sample, bar_color), fill = bar_color)) +
+  geom_bar(stat = 'identity') +
   geom_text(aes(label = n_cells), vjust = 1.5, colour = "black") +
-  scale_y_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_fill_identity() + # Use the colors directly from the dataset
   NoLegend() + RotatedAxis() +
   ylab(expression(italic(N)[cells])) + xlab('Sample Name') +
   ggtitle(paste('Total cells:', sum(df$n_cells))) +
-  theme(
-    panel.grid.minor=element_blank(),
-    panel.grid.major.y=element_line(colour="lightgray", size=0.5),
-  )
-
-#png('figures/basic_cells_per_sample.png', width=9, height=4, res=200, units='in')
-quartz()
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 1.5, hjust=1))
+  
+plot_filename <- paste0(plot_directory, "/barplot_samples_afterfiltering_groupcol", ".pdf")
+  pdf(plot_filename, width = 18, height = 8)  # Adjust width and height as desired
+  print(p)
+  dev.off()
 p
 ```
 
@@ -626,8 +652,7 @@ metadata %>%
 
 ```{r subsetting, warning=FALSE}
 # subset will do cell-level filtering, remove cells with detected genes less than 350
-seurat_rna <- subsetseurat_rna <- subset(seurat_rna, subset = nFeature_RNA > 300 & nFeature_RNA < 11000 & nCount_RNA > 350 &  nCount_RNA < 75000)
-
+seurat_rna <- subset(seurat_rna, subset = nFeature_RNA > 300 & nFeature_RNA < 11000 & nCount_RNA > 350 &  nCount_RNA < 75000)
 
 # complexity of each cell to be > 0.80, so genes detected proportional to UMI
 seurat_rna <- subset(seurat_rna, subset = log10GenesPerUMI > 0.8)
@@ -667,12 +692,24 @@ VlnPlot(object = seurat_rna, features = c("percent_mt"), group.by = "SampleID",
 ```{r}
 
 
-data.filt <- SplitObject(seurat_rna, split.by = "SampleID")
-
 
 #Main clusters object
-data.object.filter.norm.integrated <- "Z:/dmclab/Marta/PD/snRNA human putamen/data/rna.combined.snRNA_seq_merged_42_res0.4_2_annotated.rds"
+data.object.filter.norm.integrated <- readRDS("Z:/dmclab/Marta/PD/snRNA human putamen/data/rna.combined.snRNA_seq_merged_42_res1.5_annotated_final.rds")
 
+ids<- unique(data.object.filter.norm.integrated$SampleID)
+ids_before<- unique(seurat_rna$SampleID)
+diff<- setdiff( ids_before,ids)
+print(diff)
+seurat_rna<-subset(seurat_rna, SampleID %in% ids) 
+#check diff agai, should be zero
+ids<- unique(data.object.filter.norm.integrated$SampleID)
+ids_before<- unique(seurat_rna$SampleID)
+diff<- setdiff(ids_before,ids)
+diff<- setdiff(ids,ids_before)
+print(diff)
+data.filt <- SplitObject(seurat_rna, split.by = "SampleID")
+saveRDS(seurat_rna, file ="Z:/dmclab/Marta/PD/snRNA human putamen/data/raw_filtered_human.rds")
+rm(seurat_rna)
 
 ```
 
@@ -680,47 +717,154 @@ We have sample numbers added at the end of each spot id with an '_' in the main 
 But for the original raw object list, this is not the case, hence we need to first check if the order of the samples is the same for both objects.
 
 ```{r}
+# SampleIDs from data.object.filter.norm.integrated
+sample_ids_integrated <- unique(data.object.filter.norm.integrated$SampleID)
+
+# Check if the SampleIDs are the same
+all(sample_ids_from_filt %in% sample_ids_integrated)  # TRUE if all from filt are in integrated
+all(sample_ids_integrated %in% sample_ids_from_filt)  # TRUE if all from integrated are in filt
+
+# Check if they match exactly (same elements, same order)
+identical(sort(sample_ids_from_filt), sort(sample_ids_integrated))
+
+```
+
+```{r}
+
+for(id in 1:length(data.filt)){
+  print(unique(data.filt[[id]]$SampleID))
+}
+
+sample_ids_list <- list()
+for (id in 1:length(data.filt)) {
+  sample_ids_list[[id]] <- unique(data.filt[[id]]$SampleID)
+}
+
+# Flatten into a single vector if you want to compare all together
+sample_ids_from_filt <- unique(unlist(sample_ids_list))
+
+
 for(id in 1:length(data.filt)){
   print(unique(data.filt[[id]]$SampleID))
 }
 ```
 
 ```{r}
-ids<- unique(data.object.filter.norm.integrated$SampleID)
-
-# Subset the Seurat object based on those IDs
-data.filt1 <- subset(x = data.filt, cells = WhichCells(data.filt, expression = SampleID %in% ids))
-
-
-for(id in 1:length(data.filt)){
-  print(unique(data.filt[[id]]$SampleID))
-}
-
+unique(data.object.filter.norm.integrated$SampleID)
 ```
 
 If yes, then we go ahead and merge the filtered object list, add sample numbers to each spot id. This way, the spot ids will match and we will be able to filter the spots we want to keep for the striatal sub-clustering.
 
 ```{r}
 #Here, seurat will automatically add sample numbers suffixed to each spot id to make sure they are unique.
+temp <- merge(data.filt[[1]], y = data.filt[2:length(data.filt)], project = "parkinsons")
 
-temp <- merge(data.filt[[1]], y = data.filt[2:length(data.filt)], project = "snRNA seq")
+#sanity check to make sure that the sample order is the same as in striatal_clus object
+unique(data.object.filter.norm.integrated$SampleID)
+
+#sanity check to make sure that the spot ids follow the same pattern as in the striatal_clus object i.e <spot_id>_<sample_no.>
+head(colnames(data.object.filter.norm.integrated))
+```
+
+If yes, then we go ahead and merge the filtered object list, add sample numbers to each spot id. This way, the spot ids will match and we will be able to filter the spots we want to keep for the striatal sub-clustering.
+
+```{r}
 
 #sanity check to make sure that the sample order is the same as in striatal_clus object
 unique(temp$SampleID)
 
 #sanity check to make sure that the spot ids follow the same pattern as in the striatal_clus object i.e <spot_id>_<sample_no.>
-head(colnames(temp))
+head(colnames(temp))==head(colnames(data.object.filter.norm.integrated))
+
+# Step 1: Check if the lengths of the column names are the same
+if (length(colnames(temp)) != length(colnames(data.object.filter.norm.integrated))) {
+  cat("The objects have different lengths:\n")
+  cat("Length of temp:", length(colnames(temp)), "\n")
+  cat("Length of seurat:", length(colnames(data.object.filter.norm.integrated)), "\n")
+} else {
+  cat("The objects have the same length.\n")
+}
+# Determine the shorter and longer objects
+if (length(colnames(temp)) <= length(colnames(data.object.filter.norm.integrated))) {
+  shorter <- colnames(temp)
+  longer <- colnames(data.object.filter.norm.integrated)
+} else {
+  shorter <- colnames(data.object.filter.norm.integrated)
+  longer <- colnames(temp)
+}
+
+# Step 1: Check if all elements in the shorter object are in the longer object
+all_in_longer <- all(shorter %in% longer)
+
+if (all_in_longer) {
+  cat("All elements in the shorter object are present in the longer object.\n")
+} else {
+  cat("Some elements in the shorter object are NOT present in the longer object.\n")
+  
+  # Step 2: Identify which elements are missing
+  missing_elements <- setdiff(shorter, longer)
+  cat("Missing elements:\n", length(missing_elements))
+
+}
+
+
+# Step 2: Check if the two objects have the same elements (ignoring order)
+if (setequal(colnames(cells.keep), colnames(temp))) {
+  cat("The objects contain the same elements, but their order may differ.\n")
+} else {
+  cat("The objects contain different elements.\n")
+  cat("Elements in temp but not in data.object.filter.norm.integrated:\n")
+  print(length(setdiff(colnames(cells.keep), colnames(temp))))
+  cat("\nElements in data.object.filter.norm.integrated but not in temp:\n")
+  print(length(setdiff(colnames(cells.keep), colnames(temp))))
+}
+
+# Step 1: Identify mismatched elements
+elements_in_temp_not_in_data <- setdiff(colnames(temp), colnames(cells.keep))
+elements_in_data_not_in_temp <- setdiff(colnames(cells.keep), colnames(temp))
+
+# Print summary
+cat("Number of elements in temp but not in data.object.filter.norm.integrated:", length(elements_in_temp_not_in_data), "\n")
+cat("Number of elements in data.object.filter.norm.integrated but not in temp:", length(elements_in_data_not_in_temp), "\n")
+
+# Step 2: Check the clusters of mismatched elements in temp (Active Ident)
+if (exists("data.object.filter.norm.integrated")) {
+  if (!is.null(Idents(data.object.filter.norm.integrated))) {
+    # Check cluster assignments of mismatched elements in temp
+    clusters_temp <- Idents(data.object.filter.norm.integrated)[elements_in_temp_not_in_data]
+    cat("\nClusters of mismatched elements in temp:\n")
+    print(table(clusters_temp, useNA = "ifany"))
+  } else {
+    cat("The active identity (Idents) is not set for data.filtere.\n")
+  }
+} else {
+  cat("data.filtere object does not exist.\n")
+}
+
+# Step 3: Remove mismatched elements from temp
+temp <- temp[, !colnames(temp) %in% elements_in_temp_not_in_data]
+
+# Print confirmation
+cat("Mismatched elements have been removed from temp.\n")
+
+
+
 ```
 
 We filter the merged object to keep only the spots from striatal clusters for the sub-clustering.
 
 ```{r}
-unique(data.object.filter.norm.integrated@active.ident)
-#data.object.filter.norm.integrated[["RNA"]] <-JoinLayers(data.object.filter.norm.integrated[["RNA"]])
-
-cells.keep <- colnames(data.object.filter.norm.integrated)[data.object.filter.norm.integrated@active.ident %in% c("eSPNs","SPNs")]
+cells.keep <- colnames(data.object.filter.norm.integrated)[data.object.filter.norm.integrated@active.ident %in% c("SPNs", "eSPNs")]
 
 head(cells.keep)
+```
+
+```{r}
+temp <- temp[ ,colnames(temp) %in% cells.keep]
+
+#double check as a sanity check
+unique(colnames(temp) == cells.keep)
+length(colnames(temp)) == length(cells.keep)
 ```
 
 ```{r}
@@ -737,7 +881,7 @@ Now we unlist the object again in order to perform SCTransform by sample. Then d
 data.filt <- SplitObject(object = temp, split.by = "SampleID")
 
 #change list names from sample ids to numbers
-print(names(data.filt) <- c(1:50))
+print(names(data.filt) <- c(1:34))
 
 saveRDS(data.filt, file = "Z:/dmclab/Marta/PD/snRNA human putamen/data/parkinsons_brain_sub-clusters_filt_allen_annotation.rds")
 ```
@@ -1186,7 +1330,7 @@ plot_filename <- paste0(plot_directory, "/UMAP_ANNOTATED_pc42_res1_subcluster_na
   print(p)
   dev.off()
   
-````
+```
 Plots
 Top 5 markers for each cluster
 Genes included only if they are expressed in atleast 25% of cells, hence not testing infrequently expressed genes.
@@ -1365,16 +1509,6 @@ pdf(plot_filename,width=8, height = 5) # Adjust width and height as desired
 print(d3)
 dev.off()
 
-DefaultAssay(rna.combined) <- "SCT"
-
-cl.colors <-  c("#048BA8","#B95F89","#BDCCE6","gray")
-cl.colors<- c("#B95F89", "#0a4347","#856fa7ff","#140224","#595959ff")
-p<-DimPlot(object = rna.combined,  reduction = "umap_after_harmony_4", pt.size = 0.6, label = F, cols=cl.colors, split.by="Sample_group") + ggtitle("SubClusters for human snRNAseq dataset")
-plot_filename <- paste0(plot_directory, "/UMAP_annotated_sub_42pc_res0.4_split_col2", ".pdf")
-  #png(plot_filename, width = 600, height = 600) 
-  pdf(plot_filename, width = 14, height = 6)  # Adjust width and height as desired
-  print(p)
-  dev.off()
 
 #violin plot of markers
 lapply(unique(ALLMRK), function(gene){
@@ -1560,17 +1694,6 @@ de_merge <- transform(de_merge, Perc = count / Freq)
 total_genes<- sum(de_merge$Freq)
 de_merge<-transform(de_merge, norm = Freq / total_genes)
 
-table_gene_count<- data.frame()
- for (clust in clusters){
-   # subset<- subset(rna.combined, Sample_group== "PD")
-   subset_cluster<- subset(rna.combined,  idents =clust)
-   subset_cluster <- subset_cluster[rowSums(subset_cluster) > 0, ]
-   gene_count<- length(rownames(subset_cluster))
-   cluster<- clust
-   gene_counts_df<- as.data.frame(gene_count, cluster)
-   table_gene_count<- rbind(table_gene_count,gene_counts_df )
- }
-#or
 
 table_gene_count <- data.frame()
 
@@ -1900,6 +2023,9 @@ keyvals <- ifelse(
  }
 }
 }
+
+
+
 clusters<- unique(de$cluster)
 for (i in names(dataset_braak)){
   df1<- dataset_braak[[i]]
@@ -1992,15 +2118,6 @@ for (clust in clusters){
   # Combine the results
   result <- rbind(most_negative, most_positive)
   result<- na.omit(result)
-
-# # Calculate the number of elements in each cluster
-#   cluster_counts <- result %>%
-#     count(cluster) %>%
-#     arrange(desc(n))
-#   
-#   # Reorder clusters based on the number of elements
-#   result <- result %>%
-#     mutate(cluster = factor(cluster, levels = cluster_counts$cluster))
 
   plot<-ggplot(result, aes(reorder(Gene, -avg_log2FC),avg_log2FC, fill= avg_log2FC))+
        geom_bar(stat="identity", width=0.7)+
@@ -2257,90 +2374,6 @@ plot<-ggplot(res_long, aes( cluster, reorder(gene, -avg_log2FC),fill= avg_log2FC
   dev.off()  
 
 
-
-
-
-m5 <- data.frame(matrix(ncol = 8, nrow = 0))
-
-#(substr(de[i, 1], 1, 2) == substr(de_genes_6ohda[j, 1], 1, 2) &&
-pb <- progress_bar$new(total = nrow(de))
-for (i in 1:nrow(de)){
-  #   pb$tick()
-  # Sys.sleep(1/nrow(de))
-  for (j in 1:nrow(de_genes_cm)){
-  if  (toupper(de[i, 7]) == toupper(de_genes_cm[j, 2])){
-      m5[nrow(m5)+1, 1] <- de[i, 1]
-      m5[nrow(m5),2] <- de_genes_cm[j, 1]
-      m5[nrow(m5), 3] <- de[i, 7]
-      m5[nrow(m5), 4] <- de[i, 3]
-      m5[nrow(m5), 5] <- de_genes_cm[j, 3]
-      m5[nrow(m5), 6] <- de_genes_cm[j, 4]
-       if (m5[nrow(m5), 4]*m5[nrow(m5), 5] < 0){
-        m5[nrow(m5), 7] <- "Divergent_mp"}
-       else {
-        m5[nrow(m5), 7] <- "Convergent_mp"}
-       if (m5[nrow(m5), 4]*m5[nrow(m5), 6] < 0){
-        m5[nrow(m5), 8] <- "Divergent_6ohda"}
-       else {
-        m5[nrow(m5), 8] <- "Convergent_6ohda"}      
-      
-      }
-    }
-}
-
-
-
-colnames(m5)<- c("Cluster_human","Cluster_mouse","Gene","avg_log2FC_human","avg_log2FC_mp","avg_log2FC_6ohda", "agreement_mp" , "agreement_6ohda" )
-
-
-library(writexl)
-
-write.xlsx(m5, file = "Z:/dmclab/Marta/PD/snRNA human putamen/Subclustering/Harmony_2/common_genes_with_mouse_DEGs_p0001_latest_noclust_harmony2_noint.xlsx")
-
-
-m5_filter <- subset(m5, agreement_mp == "Convergent_mp")
-m5_filter <- subset(m5_filter, agreement_6ohda == "Convergent_6ohda")
-
-
-result<- m5_filter[,-c(7,8)]
-result1<- result[,-c(2,5,6)]
-result1$experiment <- "Human"
-colnames(result1)<- c("cluster","gene","avg_log2FC","experiment")
-result2<- result[,-c(1,4,5)]
-result2$experiment <- "6OHDA"
-colnames(result2)<- c("cluster","gene","avg_log2FC","experiment" )
-result3<- result[,-c(1,4,6)]
-result3$experiment <- "Mitopark"
-colnames(result3)<- c("cluster","gene","avg_log2FC","experiment" )
-
-res_long <- rbind(result1, result2, result3)
-library(ggplot2)
-
-plot <- ggplot(res_long, aes(cluster, reorder(gene, -avg_log2FC), fill = avg_log2FC)) +
-  geom_tile() +
-  geom_text(aes(label = round(avg_log2FC, 2)), size = 3) +  # Add text labels with rounded avg_log2FC values
-  scale_fill_gradient2(
-    low = '#31869bff',
-    mid = 'white',
-    high = '#963634ff',
-    midpoint = 0,
-    limits = c(-1, 1),
-    oob = scales::squish
-  ) +
-  facet_grid(experiment ~ ., scales = "fixed", drop = TRUE) +
-  theme_classic() +
-  theme(
-    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 0, size = 10),
-    axis.text.y = element_text(size = 12),
-    axis.title.y = element_blank()
-  ) +
-  coord_flip() +
-  ggtitle("Most significantly commonly genes with mouse models")
-
-plot_filename <- paste0(plot_directory, "/Most_sign_shared_genes_human_mouse_noclust_aharmony2_flip3", ".pdf")
-pdf(plot_filename, width = 8, height = 4)  # Adjust width and height as desired
-print(plot)
-dev.off()
 
 
 ```
