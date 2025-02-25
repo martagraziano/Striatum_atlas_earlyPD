@@ -203,7 +203,7 @@ seurat_rna$Sample_group <- colnames(seurat_rna)
 
 seurat_rna$Sample_group[seurat_rna$Sample %in% c("15a", "15b", "15c","15d","18a", "18d")] <- "Mitopark15_18"
 seurat_rna$Sample_group[seurat_rna$Sample %in% c("MP1", "MP2", "MP3")] <- "Mitopark_11"
-seurat_rna$Sample_group[seurat_rna$Sample %in% c("C1", "C2", "C3", "C4", "C5", "Control_1", "Control_2" ,"Control_3")] <- "Control"
+seurat_rna$Sample_group[seurat_rna$Sample %in% c("C1", "C2", "C3", "C4", "C5",  "Control_2" ,"Control_3")] <- "Control"
 seurat_rna$Sample_group[seurat_rna$Sample %in% c("6OHDA_1", "6OHDA_2", "6OHDA_3")] <- "6OHDA"
 ```
 
