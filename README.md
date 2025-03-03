@@ -77,6 +77,8 @@ If you use this code in your research, please cite the following:
 A molecular atlas of cell types in the mouse and human parkinsonian striatum. (2025). Authors: Marta Graziano, Ioannis Mantas, Yuvarani Masarapu, Solène Frapard, Raquel
 Garza, (..), Johan Jakobsson, Stefania Giacomello and Konstantinos Meletis
 
+For full license details, see the [LICENSE](./LICENSE) file.
+
 ## Acknowledgements
 
 This research was funded in whole by Aligning Science Across Parkinson’s **[ASAP-020370]** through the Michael J. Fox Foundation for Parkinson’s Research (MJFF).
