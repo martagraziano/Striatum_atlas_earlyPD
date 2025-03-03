@@ -50,7 +50,7 @@ The computational requirements to run the analyses are well within the capacity 
 The repository is organized as follows:
 
 - snRNA_seq/: Scripts for analyzing single-nucleus RNA sequencing data.
-    - Conversion from anndata for cellxgene.ipynb and Dataset_fix_for_cellxgene_mouse.R: Python and R script used to format and convert the data for CellXGene resource.
+    - Conversion from anndata for cellxgene.ipynb, Dataset_fix_for_cellxgene_mouse.R and Dataset_fix_for_cellxgene_human.R: Python and R script used to format and convert the data for CellXGene resource (https://cellxgene.cziscience.com/).
     - gene_matrix_creation_for_mapmycell.ipynb: Python script used to convert the expression matrix extracted from the seurat object to map the cells to Allen tool MapMyCells (https://portal.brain-map.org/atlases-and-data/bkp/mapmycells)
     - snRNA_seq/Mouse datasets: Code to analize and to generate figures for mouse datasets. Divided in two subfolders, for analysis of the full dataset and subclustering.
 
