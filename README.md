@@ -50,7 +50,7 @@ The repository is organized as follows:
 
 - Folder **Spatial_Transcriptomics/** contains scripts to <i>analize and generate figures of spatial transcriptomics datasets</i>.
 
-- Folder **Trajectory_Inference/** contains R scripts for <i>pseudotime and trajectory analyses</i>.
+- Folder **Trajectory_Inference/** contains R scripts for <i>pseudotime and trajectory analyses</i> for human and mouse datasets.
 
 - Folder **Datasets/** contains instructions for <i>accessing raw and processed data</i>.
 
@@ -62,7 +62,7 @@ If you use this code in your research, please cite the following:
 A molecular atlas of cell types in the mouse and human parkinsonian striatum. (2025). Authors: Marta Graziano, Ioannis Mantas, Yuvarani Masarapu, Solène Frapard, Raquel
 Garza, (..), Johan Jakobsson, Stefania Giacomello and Konstantinos Meletis
 
-For full license details, see the [LICENSE](./LICENSE) file.
+This repository is released under the [MIT License](https://opensource.org/license/mit) - see the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgements
 
