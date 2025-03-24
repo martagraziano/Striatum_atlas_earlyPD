@@ -17,7 +17,7 @@
 ------------------
 ## Project Overview
 
-This repository contains scripts used to (1) analyze and plot single-nucleus RNA sequencing (snRNA-seq) data for cell-specific transcriptomic changes in the striatum from Parkinson's Disease (PD) mouse models and human tissue; (2) pProcess and visualize spatial transcriptomics (ST) data to map regional vulnerabilities within the striatum, (3) perform differential expression and pseudotime trajectory analyses for specific cell types, particularly focusing on astrocytes, oligodendrocytes, and spiny projection neurons (SPNs); and (4) Apply computational models for trajectory inference and pseudotime analyse. These scripts were custom-written by Marta Graziano and used in the study "RA molecular atlas of cell types in the mouse and human parkinsonian striatum."
+<p align="justify">This repository contains scripts used to (1) analyze and plot single-nucleus RNA sequencing (snRNA-seq) data for cell-specific transcriptomic changes in the striatum from Parkinson's Disease (PD) mouse models and human tissue; (2) pProcess and visualize spatial transcriptomics (ST) data to map regional vulnerabilities within the striatum, (3) perform differential expression and pseudotime trajectory analyses for specific cell types, particularly focusing on astrocytes, oligodendrocytes, and spiny projection neurons (SPNs); and (4) Apply computational models for trajectory inference and pseudotime analyse. These scripts were custom-written by Marta Graziano and used in the study "RA molecular atlas of cell types in the mouse and human parkinsonian striatum."<p/>
 
 ------------------
 ## System Requirements
