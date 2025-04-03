@@ -45,12 +45,12 @@ The repository is organized as follows:
 - Folder **snRNA_seq/** contains scripts for <i>analyzing single-nucleus RNA sequencing data</i>:
     - **Conversion from anndata for cellxgene.ipynb**, **Dataset_fix_for_cellxgene_mouse.R** and **Dataset_fix_for_cellxgene_human.R**: Python and R scripts used to format and convert the data for CellXGene resource (https://cellxgene.cziscience.com/).
     - **gene_matrix_creation_for_mapmycell.ipynb**: Python script used to convert the expression matrix extracted from the seurat object to map the cells to Allen tool MapMyCells (https://portal.brain-map.org/atlases-and-data/bkp/mapmycells).
-    - **snRNA_seq/Mouse datasets**: Scripts to analize and generate figures for mouse datasets. Divided in two subfolders for analysis of the full dataset (**snRNA_seq/Human datasets/Analysis_full_dataset**) and subclustering (**snRNA_seq/Humandatasets/Sub_clustering_SPNs_mouse**).
-    - **snRNA_seq/Human datasets**: Scripts to analize and generate figures for human datasets. Divided in two subfolders for analysis of the full dataset (**snRNA_seq/Human datasets/Analysis_full_dataset**) and subclustering (**snRNA_seq/Humandatasets/Sub_clustering_SPNs_human**).
+    - **snRNA_seq/Mouse datasets**: Scripts to analize and generate figures for mouse datasets. Divided in two subfolders for analysis of the full dataset (**snRNA_seq/Mouse datasets/Analysis_full_dataset**), for figure 1 and 2, subclustering (**snRNA_seq/Mousedatasets/Sub_clustering_SPNs_mouse**) for figure 3.
+    - **snRNA_seq/Human datasets**: Scripts to analize and generate figures for human datasets. Divided in two subfolders for analysis of the full dataset (**snRNA_seq/Human datasets/Analysis_full_dataset**), for figure 1 and 5, subclustering (**snRNA_seq/Humandatasets/Sub_clustering_SPNs_human**) for figure 6.
 
-- Folder **Spatial_Transcriptomics/** contains scripts to <i>analize and generate figures of spatial transcriptomics datasets</i>.
+- Folder **Spatial_Transcriptomics/** contains scripts to <i>analize and generate figures of spatial transcriptomics datasets</i> for figure 4.
 
-- Folder **Trajectory_Inference/** contains R scripts for <i>pseudotime and trajectory analyses</i> for human and mouse datasets.
+- Folder **Trajectory_Inference/** contains R scripts for <i>pseudotime and trajectory analyses</i> for human and mouse datasets in figures 2, 3, 5 and 6.
 
 - Folder **Datasets/** contains instructions for <i>accessing raw and processed data</i>.
 
