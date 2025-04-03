@@ -11,6 +11,7 @@
 * [System Requirements](#system-requirements)
 * [Hardware Requirements](#hardware-requirements)
 * [Folder Structure](#folder-structure)
+* [Data Availability](#data-availabilty)
 * [License and citation](#license-and-citation)
 * [Acknowledgements](#acknowledgements)
 
@@ -53,6 +54,12 @@ The repository is organized as follows:
 - Folder **Trajectory_Inference/** contains R scripts for <i>pseudotime and trajectory analyses</i> for human and mouse datasets in figures 2, 3, 5 and 6.
 
 - Folder **Datasets/** contains instructions for <i>accessing raw and processed data</i>.
+- 
+------------------
+## Data Availability
+
+The raw mouse sequencing data (ST and snRNA-seq) generated for this manuscript will be published upon submission in the CRN Google Cloud repository. The same repository already hosts the raw data for the human postmortem dataset, accessible at: https://cloud.parkinsonsroadmap.org/collections.
+Processed matrices and analyzed datasets for snRNA seq will be available on the CellXGene platform after acceptance. 
 
 ------------------
 ##  License and Citation
