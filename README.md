@@ -49,12 +49,11 @@ The repository is organized as follows:
     - **snRNA_seq/Mouse datasets**: Scripts to analize and generate figures for mouse datasets. Divided in two subfolders for analysis of the full dataset (**snRNA_seq/Mouse datasets/Analysis_full_dataset**), for figure 1 and 2, subclustering (**snRNA_seq/Mousedatasets/Sub_clustering_SPNs_mouse**) for figure 3.
     - **snRNA_seq/Human datasets**: Scripts to analize and generate figures for human datasets. Divided in two subfolders for analysis of the full dataset (**snRNA_seq/Human datasets/Analysis_full_dataset**), for figure 1 and 5, subclustering (**snRNA_seq/Humandatasets/Sub_clustering_SPNs_human**) for figure 6.
 
-- Folder **Spatial_Transcriptomics/** contains scripts to <i>analize and generate figures of spatial transcriptomics datasets</i> for figure 4.
-
 - Folder **Trajectory_Inference/** contains R scripts for <i>pseudotime and trajectory analyses</i> for human and mouse datasets in figures 2, 3, 5 and 6.
 
 - Folder **Datasets/** contains instructions for <i>accessing raw and processed data</i>.
 - 
+- https://github.com/giacomellolab/EarlyParkinsons_Striatum_Atlas/tree/main/SpatialTranscriptomics contains scripts to <i>analize and generate figures of spatial transcriptomics datasets</i> for figure 4.
 ------------------
 ## Data Availability
 
