@@ -52,7 +52,7 @@ The repository is organized as follows:
 - Folder **Trajectory_Inference/** contains R scripts for <i>pseudotime and trajectory analyses</i> for human and mouse datasets in figures 2, 3, 5 and 6.
 
 - Folder **Datasets/** contains instructions for <i>accessing raw and processed data</i>.
-- 
+
 - https://github.com/giacomellolab/EarlyParkinsons_Striatum_Atlas/tree/main/SpatialTranscriptomics contains scripts to <i>analize and generate figures of spatial transcriptomics datasets</i> for figure 4.
 ------------------
 ## Data Availability
