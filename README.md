@@ -41,6 +41,7 @@ The computational requirements to run the analyses are well within the capacity 
 
 ------------------
 ## Folder Structure
+
 The repository is organized as follows:
 
 - Folder **snRNA_seq/** contains scripts for <i>analyzing single-nucleus RNA sequencing data</i>:
@@ -54,6 +55,7 @@ The repository is organized as follows:
 - Folder **Datasets/** contains instructions for <i>accessing raw and processed data</i>.
 
 - https://github.com/giacomellolab/EarlyParkinsons_Striatum_Atlas/tree/main/SpatialTranscriptomics contains scripts to <i>analize and generate figures of spatial transcriptomics datasets</i> for figure 4.
+  
 ------------------
 ## Data Availability
 
