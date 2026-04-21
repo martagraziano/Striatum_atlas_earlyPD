@@ -1,0 +1,465 @@
+---
+title: "hWGCNA SPN – Figure 6 panels G–J (Full Pipeline)"
+output: html_document
+---
+
+# Libraries
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(WGCNA)
+library(hdWGCNA)
+library(Seurat)
+library(ggplot2)
+library(ggpubr)
+library(patchwork)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(stringr)
+library(ComplexHeatmap)
+library(circlize)
+library(pheatmap)
+library(gridExtra)
+library(writexl)
+library(UCell)
+library(igraph)
+library(purrr)
+theme_set(theme_cowplot())
+```
+
+# Paths & colour palettes
+
+```{r setup}
+rna.combined <- readRDS("Z:/dmclab/Marta/PD/snRNA human putamen/data/definitive/rna_combined_spn_subtypes_hwgnca_Braak.rds")
+indir        <- "Z:/dmclab/Marta/PD/snRNA human putamen/new_allen_withouteplicates/subclustering/Revision/hwcgna_samplegroups_Braak"
+dir.create(indir, showWarnings = FALSE)
+set.seed(12345)
+
+# Sample-group colours used in panels G–J
+sg_colors <- c(
+  "0" = "#858585",
+  "4" = "#be7b7eff",
+  "6" = "#84484aff"
+)
+
+# Module → WGCNA colour mapping
+module_color_map <- data.frame(
+  module = c("Module_1","Module_2","Module_3","Module_4","Module_5",
+             "Module_6","Module_7","Module_8","Module_9"),
+  color  = c("brown","turquoise","blue","pink","green",
+             "yellow","red","black","magenta"),
+  stringsAsFactors = FALSE
+)
+
+pairwise_comparisons <- list(c("0","4"), c("0","6"))
+```
+
+# ── hdWGCNA PIPELINE ──────────────────────────────────────────────────────────
+
+## Subset & clean object
+
+```{r subset}
+rna.combined <- subset(
+  x      = rna.combined,
+  idents = setdiff(unique(Idents(rna.combined)), c("Ctx IT", "INs"))
+)
+
+# Remove UMAP outlier region
+umap_data     <- Embeddings(rna.combined, reduction = "umap_after_harmony_4")
+cells_to_keep <- !(umap_data[,1] >= 2 & umap_data[,1] <= 9 &
+                   umap_data[,2] >= 0 & umap_data[,2] <= 6)
+rna.combined  <- subset(rna.combined, cells = colnames(rna.combined)[cells_to_keep])
+rna.combined$clusters <- Idents(rna.combined)
+rna.combined  <- subset(rna.combined, subset = Braak != 3)
+```
+
+## SetupForWGCNA → Metacells → Normalize
+
+```{r setup_wgcna}
+rna.combined <- SetupForWGCNA(
+  rna.combined,
+  gene_select = "fraction",
+  fraction    = 0.05,
+  wgcna_name  = "wgcna_1"
+)
+
+rna.combined <- MetacellsByGroups(
+  seurat_obj  = rna.combined,
+  group.by    = c("clusters","Sample_group"),
+  reduction   = "umap_after_harmony_4",
+  k           = 20,
+  max_shared  = 10,
+  ident.group = "Sample_group"
+)
+
+rna.combined <- NormalizeMetacells(rna.combined)
+```
+
+## SetDatExpr → TestSoftPowers → ConstructNetwork
+
+```{r network}
+valid_groups <- as.character(rna.combined$Sample_group)
+
+rna.combined <- SetDatExpr(
+  rna.combined,
+  group_name = valid_groups,
+  group.by   = "Sample_group",
+  assay      = "RNA",
+  layer      = "data"
+)
+
+rna.combined <- TestSoftPowers(rna.combined, networkType = "signed")
+
+rna.combined <- ConstructNetwork(
+  rna.combined,
+  soft_power    = 9,
+  tom_name      = "SPNs_sg",
+  overwrite_tom = TRUE
+)
+```
+
+## ScaleData → ModuleEigengenes → ModuleConnectivity → ResetModuleNames
+
+```{r eigengenes}
+rna.combined <- ScaleData(rna.combined, features = VariableFeatures(rna.combined))
+
+rna.combined <- ModuleEigengenes(rna.combined)
+
+rna.combined <- ModuleConnectivity(rna.combined)
+
+rna.combined <- ResetModuleNames(rna.combined, new_name = "Module_")
+```
+
+## ModuleExprScore (UCell)
+
+```{r ucell}
+rna.combined <- ModuleExprScore(rna.combined, n_genes = 25, method = "UCell")
+```
+
+## Retrieve hMEs & build long-format table
+
+```{r hmes}
+hMEs <- GetMEs(rna.combined)
+hMEs$Sample_group <- rna.combined$Braak
+
+hMEs_long <- pivot_longer(
+  hMEs,
+  cols      = -Sample_group,
+  names_to  = "Module",
+  values_to = "Eigengene"
+)
+```
+
+## ANOVA – identify significant modules
+
+```{r anova_sig_modules}
+module_stats <- hMEs_long %>%
+  group_by(Module) %>%
+  summarise(
+    p_value = summary(aov(Eigengene ~ Sample_group))[[1]][["Pr(>F)"]][1]
+  ) %>%
+  mutate(adj_p = p.adjust(p_value, method = "fdr")) %>%
+  arrange(adj_p)
+
+sig_modules <- module_stats %>% filter(adj_p < 0.05) %>% pull(Module)
+
+hMEs_sig <- hMEs_long %>%
+  filter(Module %in% sig_modules) %>%
+  left_join(module_color_map, by = c("Module" = "module"))
+```
+
+## Build raw-eigengene summary per module × cluster × Braak
+
+```{r raw_summary}
+# Add hMEs to metadata
+hmes_numeric <- hMEs[, sapply(hMEs, is.numeric)]
+rna.combined  <- AddMetaData(rna.combined, metadata = hmes_numeric)
+
+hMEs_raw <- hMEs %>%
+  dplyr::select(all_of(module_color_map$module)) %>%
+  rownames_to_column("cell_id")
+
+cell_info <- rna.combined@meta.data %>%
+  dplyr::select(clusters, Sample_group = Braak) %>%
+  rownames_to_column("cell_id")
+
+summary_raw_barplot <- hMEs_raw %>%
+  pivot_longer(cols = -cell_id, names_to = "Module", values_to = "Value") %>%
+  left_join(cell_info, by = "cell_id") %>%
+  filter(!grepl("grey", Module)) %>%
+  group_by(Module, clusters, Sample_group) %>%
+  summarise(mean_Raw = mean(Value, na.rm = TRUE), .groups = "drop")
+```
+
+## Build delta metrics + ANOVA / Welch T-test statistics (Braak transitions)
+
+```{r delta_stats}
+master_module_metrics <- summary_raw_barplot %>%
+  pivot_wider(names_from = Sample_group, values_from = mean_Raw, names_prefix = "Group_") %>%
+  mutate(across(starts_with("Group_"), ~replace_na(., 0))) %>%
+  mutate(
+    Delta_Early = Group_4 - Group_0,
+    Delta_Late  = Group_6 - Group_4,
+    delta_total = Group_6 - Group_0
+  )
+
+get_comprehensive_stats <- function(mod, clus) {
+  cell_names <- colnames(rna.combined)[rna.combined$clusters == clus]
+  if (length(cell_names) < 10)
+    return(data.frame(P_ANOVA = NA, P_Early = NA, P_Late = NA, P_Total = NA))
+
+  test_data <- data.frame(
+    val = hMEs[cell_names, mod],
+    grp = factor(rna.combined$Braak[cell_names], levels = c("0","4","6"))
+  )
+  anova_res <- aov(val ~ grp, data = test_data)
+  p_anova   <- summary(anova_res)[[1]][["Pr(>F)"]][1]
+
+  safe_t <- function(g1, g2) {
+    sub <- test_data %>% filter(grp %in% c(g1, g2))
+    if (length(unique(sub$grp)) < 2) return(NA)
+    t.test(val ~ grp, data = sub)$p.value
+  }
+  data.frame(
+    P_ANOVA = p_anova,
+    P_Early = safe_t("0","4"),
+    P_Late  = safe_t("4","6"),
+    P_Total = safe_t("0","6")
+  )
+}
+
+master_sig_braak <- master_module_metrics %>%
+  rowwise() %>%
+  mutate(stats = list(get_comprehensive_stats(Module, clusters))) %>%
+  unnest(stats) %>%
+  ungroup() %>%
+  mutate(across(starts_with("P_"), ~p.adjust(., method = "BH"), .names = "{.col}_adj")) %>%
+  mutate(across(ends_with("_adj"),
+                ~case_when(. < 0.001 ~ "***", . < 0.01 ~ "**", . < 0.05 ~ "*", TRUE ~ " "),
+                .names = "{.col}_sig"))
+```
+
+## Compute intra-module pairwise gene–gene correlations per group
+
+```{r intramodule_corr}
+modules_df   <- GetModules(rna.combined) %>% filter(module != "grey")
+modules_list <- unique(modules_df$module)
+groups       <- unique(rna.combined$Braak)
+
+corr_values <- data.frame()
+
+for (mod in modules_list) {
+  mod_genes <- modules_df %>% filter(module == mod) %>% pull(gene_name)
+
+  for (grp in groups) {
+    cells    <- WhichCells(rna.combined, expression = Braak == grp)
+    expr_mat <- GetAssayData(rna.combined, assay = "RNA", slot = "data")[mod_genes, cells, drop = FALSE]
+    if (nrow(expr_mat) < 3 || ncol(expr_mat) < 10) next
+
+    cor_mat  <- cor(t(as.matrix(expr_mat)), method = "pearson", use = "pairwise.complete.obs")
+    cor_vals <- abs(cor_mat[lower.tri(cor_mat)])
+    corr_values <- rbind(corr_values,
+                         data.frame(module = mod, group = grp, correlation = cor_vals))
+  }
+}
+
+corr_values <- corr_values %>%
+  left_join(module_color_map, by = c("module" = "module"))
+```
+
+## FindDMEs (Braak 4 & 6 vs Control)
+
+```{r dme}
+target_groups    <- as.character(unique(rna.combined$Braak[!rna.combined$Braak %in% "0"]))
+control_barcodes <- rownames(subset(rna.combined@meta.data, Braak == "0"))
+
+dme_list <- list()
+for (group in target_groups) {
+  exp_barcodes <- rownames(subset(rna.combined@meta.data, Braak == group))
+  res <- FindDMEs(
+    rna.combined,
+    barcodes1  = exp_barcodes,
+    barcodes2  = control_barcodes,
+    test.use   = "wilcox",
+    harmonized = TRUE,
+    wgcna_name = "wgcna_1"
+  )
+  res$Comparison <- paste0(group, "_vs_0")
+  res$Module     <- rownames(res)
+  dme_list[[group]] <- res
+}
+
+all_dme_results <- do.call(rbind, dme_list)
+```
+
+## Save object
+
+```{r save}
+saveRDS(rna.combined, file = file.path(indir, "rna_combined_spn_hwgcna_Braak.rds"))
+```
+
+# ── FIGURE 6G – Module eigengene UMAPs ────────────────────────────────────────
+
+```{r fig6G}
+p_list <- ModuleFeaturePlot(
+  rna.combined,
+  reduction = "umap_after_harmony_4",
+  features  = "hMEs",
+  order     = TRUE
+)
+
+n_cols     <- 3
+n_rows     <- ceiling(length(p_list) / n_cols)
+panel_size <- 4
+
+for (i in seq_along(p_list)) {
+  p_list[[i]] <- p_list[[i]] +
+    scale_colour_gradient2(
+      low      = "#e08214ff",
+      mid      = "gray",
+      high     = "#592664ff",
+      midpoint = 0,
+      na.value = "grey80"
+    ) +
+    theme(
+      plot.title      = element_text(size = 10, face = "bold"),
+      legend.position = "right",
+      aspect.ratio    = 1
+    )
+}
+
+fig6G <- wrap_plots(p_list, ncol = n_cols)
+
+ggsave(
+  filename  = file.path(indir, "Fig6G_Module_FeaturePlots.pdf"),
+  plot      = fig6G,
+  width     = n_cols * panel_size + 2,
+  height    = n_rows * panel_size,
+  limitsize = FALSE
+)
+```
+
+# ── FIGURE 6H – Module dot plot (load per condition) ─────────────────────────
+
+```{r fig6H}
+p6H <- ggplot(
+  summary_raw_barplot %>%
+    group_by(Module, Sample_group) %>%
+    summarise(mean_Raw = mean(mean_Raw, na.rm = TRUE), .groups = "drop"),
+  aes(x = Sample_group, y = Module, color = mean_Raw, size = abs(mean_Raw))
+) +
+  geom_point(alpha = 0.9) +
+  scale_color_gradient2(
+    low = "#31869bff", mid = "gray", high = "#963634ff", midpoint = 0
+  ) +
+  scale_size_continuous(range = c(1, 8)) +
+  theme_bw() +
+  labs(
+    title = "Module Eigengene Load per Sample Group",
+    x     = "Sample Group",
+    y     = "Module",
+    color = "Mean Eigengene",
+    size  = "|Mean Eigengene|"
+  )
+
+pdf(file.path(indir, "Fig6H_Module_Dotplot.pdf"), width = 6, height = 5)
+print(p6H)
+dev.off()
+```
+
+# ── FIGURE 6I – Cumulative load bar chart ─────────────────────────────────────
+
+```{r fig6I}
+cluster_load_summary <- master_sig_braak %>%
+  group_by(clusters) %>%
+  summarise(
+    `Ctrl->Braak 4` = sum(abs(Delta_Early), na.rm = TRUE),
+    `Braak 4->6`    = sum(abs(Delta_Late),  na.rm = TRUE),
+    `Total`         = sum(abs(delta_total), na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(cols = -clusters, names_to = "Transition", values_to = "Cumulative_Load")
+
+p6I <- ggplot(
+  cluster_load_summary,
+  aes(x = reorder(clusters, -Cumulative_Load), y = Cumulative_Load, fill = Transition)
+) +
+  geom_bar(stat = "identity", position = "dodge", color = "black", linewidth = 0.15) +
+  scale_fill_manual(values = c(
+    "Ctrl->Braak 4" = "#d8b0b2ff",
+    "Braak 4->6"    = "#84484aff",
+    "Total"         = "#5e2f31"
+  )) +
+  theme_bw() +
+  theme(
+    axis.text.x     = element_text(angle = 45, hjust = 1, size = 8, face = "bold"),
+    legend.position = "bottom"
+  ) +
+  labs(
+    title = "Cumulative Transcriptomic Load per Cluster",
+    x     = "Cell Cluster",
+    y     = "Cumulative |Δ Eigengene|",
+    fill  = "Transition"
+  )
+
+pdf(file.path(indir, "Fig6I_Cumulative_Load_Clusters.pdf"), width = 10, height = 5)
+print(p6I)
+dev.off()
+```
+
+# ── FIGURE 6J – Violin: avg eigengene + intra-module correlation ──────────────
+
+```{r fig6J}
+# One combined PDF per significant module
+for (mod in sig_modules) {
+  module_color <- module_color_map$color[module_color_map$module == mod]
+
+  # Left: avg eigengene violin with Wilcoxon pairwise comparisons
+  hme_plot <- hMEs_sig %>%
+    filter(Module == mod) %>%
+    ggplot(aes(x = Sample_group, y = Eigengene, fill = Sample_group)) +
+    geom_violin(trim = FALSE, scale = "width", alpha = 0.8, color = NA) +
+    stat_summary(fun = "median", geom = "point", shape = 95, size = 5, color = "black") +
+    stat_compare_means(comparisons = pairwise_comparisons, method = "wilcox.test") +
+    facet_wrap(~Module, scales = "free_y") +
+    scale_fill_manual(values = sg_colors) +
+    ylim(0, 50) +
+    theme_bw(base_size = 11) +
+    labs(
+      title = paste(mod, "–", module_color),
+      y     = "Avg eigengene",
+      x     = "Sample Group"
+    ) +
+    theme(legend.position = "none",
+          strip.text = element_text(size = 10, face = "bold"))
+
+  # Right: intra-module gene–gene correlation violin with Wilcoxon pairwise comparisons
+  corr_plot <- corr_values %>%
+    filter(module == mod) %>%
+    ggplot(aes(x = group, y = correlation, fill = group)) +
+    geom_violin(trim = FALSE, scale = "width", alpha = 1) +
+    stat_compare_means(
+      comparisons = pairwise_comparisons,
+      method      = "wilcox.test",
+      label       = "p.signif"
+    ) +
+    ylim(0, 1) +
+    scale_fill_manual(values = sg_colors) +
+    theme_bw() +
+    labs(
+      title = paste("Intra-Module Correlation:", mod),
+      x     = "Sample Group",
+      y     = "Correlation"
+    ) +
+    theme(legend.position = "none")
+
+  combined <- hme_plot + corr_plot + plot_layout(ncol = 2)
+
+  ggsave(
+    filename = file.path(indir, paste0("Fig6J_", mod, "_eigengene_and_correlation.pdf")),
+    plot     = combined,
+    width    = 11,
+    height   = 5
+  )
+}
+```

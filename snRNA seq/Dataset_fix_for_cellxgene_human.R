@@ -1,6 +1,6 @@
 
-rna.combined<-readRDS("Z:/dmclab/Marta/PD/snRNA human putamen/data/rna.combined.snRNA_seq_merged_42_res1.5_annotated_final.rds")
-rna.combined<-readRDS("Z:/dmclab/Marta/PD/snRNA human putamen/data/rna.combined_res1_sub_annotated_allen_noduplicates.rds")
+rna.combined<-readRDS("Z:/dmclab/Marta/PD/snRNA human putamen/data/definitive/rna.combined.snRNA_seq_merged_42_res1.5_annotated_final.rds")
+rna.combined<-readRDS("Z:/dmclab/Marta/PD/snRNA human putamen/data/definitive/rna.combined_res1_sub_annotated_allen_noduplicates.rds")
 
 metadata<- rna.combined@meta.data
 
@@ -13,7 +13,13 @@ colnames(rna.combined@meta.data)[colnames(rna.combined@meta.data) == "Sample_gro
 library(readxl)
 clinical_data<- read_xlsx("Z:/dmclab/Marta/PD/snRNA human putamen/clinical_data.xlsx")
 
+#print samples id
+samples<- as.data.frame(cbind( metadata$SampleID, metadata$Sample_group))
+colnames(samples)<- c( "SampleID","Sample_group")
+unique_samples <- samples %>%
+  distinct()
 
+write.csv(unique_samples,"Z:/dmclab/Marta/PD/snRNA human putamen/data/Samples_metadata_human.csv")
 
 # Extract the metadata from the Seurat object
 rna_metadata <- rna.combined@meta.data
