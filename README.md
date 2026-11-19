@@ -50,12 +50,12 @@ The repository is organized as follows:
     - **Conversion from anndata for cellxgene.ipynb**, **Dataset_fix_for_cellxgene_mouse.R** and **Dataset_fix_for_cellxgene_human.R**: Python and R scripts used to format and convert the data for CellXGene resource (https://cellxgene.cziscience.com/).
     - **gene_matrix_creation_for_mapmycell.ipynb**: Python script used to convert the expression matrix extracted from the seurat object to map the cells to Allen tool MapMyCells (https://portal.brain-map.org/atlases-and-data/bkp/mapmycells).
     - **snRNA seq/Mouse datasets**: Scripts to analyze and generate figures for mouse datasets. Divided in two subfolders for analysis of the full dataset (**snRNA seq/Mouse datasets/Analysis_full_dataset**), for figure 1 and 2, and subclustering (**snRNA seq/Mouse datasets/Sub_clustering_SPNs_mouse**) for figure 3.
-        - **GO_enrichment_mouse_DEGs.R**: GO Molecular Function enrichment (clusterProfiler) of up- and downregulated DEGs per cell type, for figure 2.
     - **snRNA seq/Human datasets**: Scripts to analyze and generate figures for human datasets. Divided in two subfolders for analysis of the full dataset (**snRNA seq/Human datasets/Analysis_full_dataset**), for figure 1 and 5, and subclustering (**snRNA seq/Human datasets/Sub_clustering_SPNs_human**) for figure 6.
 
 - Folder **Downstream analysis/** contains scripts for the <i>downstream analyses added in the revision</i>:
     - **Downstream analysis/hdWGCNA/hdWGCNA_SPN_mouse.Rmd**: hdWGCNA co-expression network of mouse SPN subclusters (control, 6-OHDA, MitoPark): module eigengenes, differential module eigengenes, module load and module eigengene violin plots, for figure 3G–J.
     - **Downstream analysis/hdWGCNA/hdWGCNA_SPN_human.Rmd**: hdWGCNA co-expression network of human putamen SPN subclusters (non-PD, Braak 4, Braak 6): module eigengene UMAPs, differential module eigengenes, module load and module eigengene violin plots, for figure 6G–J.
+    - **Downstream analysis/GO/GO_enrichment_mouse_DEGs.R**: GO Molecular Function enrichment (clusterProfiler) of up- and downregulated DEGs per mouse cell type, for figure 2.
     - **Downstream analysis/Tangram/tangram_mapping.py**: Tangram mapping (cluster mode) of snRNA-seq SPN subtypes onto Visium sections, mapping validation and enrichment per spatial cluster, for figure 4B and supplementary figure 8A–B.
     - **Downstream analysis/DESeq2/DESeq2_ST_pseudobulk_pooled.R**: pseudobulk DESeq2 of the striatal ST clusters 4, 5 and 8 pooled per mouse (mild 6-OHDA vs control), for supplementary table 5.
 
@@ -66,7 +66,11 @@ The repository is organized as follows:
 ------------------
 ## Data Availability
 
-The raw mouse and human sequencing data are available on the ASAP CRN Cloud repository ([mouse ST](https://cloud.parkinsonsroadmap.org/collections/prod-cragg-mouse-spatial-visium-striatum/overview), [mouse snRNA-seq](https://cloud.parkinsonsroadmap.org/collections/prod-cragg-mouse-sn-rnaseq-striatum/overview), [human snRNA-seq](https://cloud.parkinsonsroadmap.org/collections/jakobsson-20/overview)). Processed matrices and analyzed datasets for snRNA seq will be available on the CellXGene platform after acceptance.
+The mouse snRNA-seq and spatial transcriptomics data generated in this study have been deposited in the GEO database under accession codes [GSE298848](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE298848) (snRNA-seq) and [GSE298680](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE298680) (spatial transcriptomics). They are also available in the ASAP CRN Cloud (snRNA-seq: https://doi.org/10.5281/zenodo.15400040; spatial transcriptomics: https://doi.org/10.5281/zenodo.15428116).
+
+The raw human post-mortem snRNA-seq data are available under restricted access because they derive from human donors and are subject to donor consent and data-protection conditions. Access can be obtained through a data access request on the ASAP CRN Cloud (dataset jakobsson-pmdbs-sn-rnaseq-v2; https://doi.org/10.5281/zenodo.15162835), following the instructions in the CRN Cloud User Manual.
+
+The processed human and mouse count matrices and annotated objects are publicly available on [CZ CELLxGENE Discover](https://cellxgene.cziscience.com/collections/a42ba860-a1b2-46db-ba81-163f1c28d4ef) and Mendeley Data.
 
 ------------------
 ## License and Citation
