@@ -1,0 +1,266 @@
+---
+title: "hdWGCNA of human putamen SPNs across Braak stages (Figure 6G-J)"
+output: html_document
+---
+
+<!--
+Purpose : co-expression network analysis (hdWGCNA) of human SPN subclusters,
+          non-PD (Braak 0) vs Braak 4 vs Braak 6.
+Input   : annotated human SPN Seurat object
+          (rna.combined_res1_sub_annotated_allen_noduplicates.rds).
+Outputs (written to out_dir):
+  hdWGCNA_modules_by_color.xlsx           module gene assignment and kME
+  Module_FeaturePlots.pdf                 Fig 6G  module eigengene UMAPs
+  DME_Braak_vs_nonPD.csv,
+  builtin_comparison_modules_per_condition_avglogfc_ordered.pdf
+                                          Fig 6H  DMEs (FindDMEs, Wilcoxon, Bonferroni)
+  Module_Load_Braak.csv,
+  Human_Module_Load_Braak.pdf             Fig 6I  module load (sum of |delta ME| vs non-PD over SPN subclusters)
+  <module>_ME_violin_wilcox.pdf           Fig 6J  ME violins (Wilcoxon vs non-PD)
+-->
+
+```{r setup}
+library(Seurat)
+library(WGCNA)
+library(hdWGCNA)
+library(cowplot)
+library(patchwork)
+library(ggplot2)
+library(ggpubr)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(writexl)
+
+theme_set(theme_cowplot())
+
+# Paths (edit)
+data_dir <- "data"                         # folder containing the input Seurat object
+out_dir  <- "results/hdWGCNA_SPN_human"
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
+set.seed(12345)
+```
+
+```{r load-and-subset}
+# Load the annotated SPN object and keep SPN subclusters only
+rna.combined_sub <- readRDS(file.path(data_dir, "rna.combined_res1_sub_annotated_allen_noduplicates.rds"))
+rna.combined_sub <- subset(x = rna.combined_sub, idents = setdiff(unique(Idents(rna.combined_sub)), c("Ctx IT", "INs", "Splatter")))
+
+# Remove the cells in the UMAP region excluded from the analysis
+umap_data <- Embeddings(rna.combined_sub, reduction = "umap_after_harmony_4")
+cells_to_keep <- !(umap_data[, 1] >= 2 & umap_data[, 1] <= 9 &
+                   umap_data[, 2] >= 0 & umap_data[, 2] <= 6)
+rna.combined_sub <- subset(rna.combined_sub, cells = colnames(rna.combined_sub)[cells_to_keep])
+rna.combined_sub$clusters <- Idents(rna.combined_sub)
+
+# Keep Braak 0 (non-PD), 4 and 6
+rna.combined_sub <- subset(rna.combined_sub, subset = Braak != 3)
+rna.combined_sub <- subset(rna.combined_sub, subset = Braak != 5)
+```
+
+```{r network}
+# Gene selection: genes expressed in >= 5% of cells
+rna.combined <- SetupForWGCNA(
+  rna.combined_sub,
+  gene_select = "fraction",
+  fraction = 0.05,
+  wgcna_name = "wgcna_1"
+)
+rm(rna.combined_sub)
+
+# Metacells per SPN subcluster and Braak stage
+rna.combined <- MetacellsByGroups(
+  seurat_obj = rna.combined,
+  group.by = c("clusters", "Braak"),
+  reduction = 'umap_after_harmony_4',
+  k = 20,
+  max_shared = 10,
+  ident.group = 'Braak'
+)
+rna.combined <- NormalizeMetacells(rna.combined)
+
+DefaultAssay(rna.combined) <- "RNA"
+rna.combined <- NormalizeData(
+  object = rna.combined,
+  normalization.method = "LogNormalize"
+)
+
+# Expression matrix for network construction (all Braak groups)
+rna.combined$Braak <- as.character(rna.combined$Braak)
+valid_groups <- rna.combined$Braak
+rna.combined <- SetDatExpr(
+  rna.combined,
+  group_name = valid_groups,
+  group.by = "Braak",
+  assay = "SCT",
+  layer = "data"
+)
+
+# Soft-power selection (signed network)
+rna.combined <- TestSoftPowers(
+  rna.combined,
+  networkType = 'signed'
+)
+
+# Co-expression network (soft power 9); TOM is written to disk
+rna.combined <- ConstructNetwork(
+  rna.combined, soft_power = 9,
+  tom_name = "SPNs_braak", overwrite_tom = TRUE
+)
+```
+
+```{r eigengenes}
+# Module eigengenes (MEs) in the full single-cell dataset
+rna.combined <- ScaleData(rna.combined, features = VariableFeatures(rna.combined))
+rna.combined <- ModuleEigengenes(rna.combined)
+
+# Eigengene-based connectivity (kME) and module renaming (Module_1 ... Module_9)
+rna.combined <- ModuleConnectivity(rna.combined)
+rna.combined <- ResetModuleNames(rna.combined, new_name = "Module_")
+
+# Module assignment table (genes, module, colour, kME)
+modules <- GetModules(rna.combined) %>% subset(module != 'grey')
+write_xlsx(modules, path = file.path(out_dir, "hdWGCNA_modules_by_color.xlsx"))
+
+# MEs per nucleus, with Braak stage
+hMEs <- GetMEs(rna.combined)
+hMEs$Braak <- rna.combined$Braak
+
+braak_colors <- c("0" = "gray", "4" = "#a34246ff", "6" = "#330000")
+```
+
+```{r fig6G-feature-plots}
+# Fig 6G: module eigengene UMAPs
+p_list <- ModuleFeaturePlot(
+  rna.combined, reduction = "umap_after_harmony_4",
+  features = 'hMEs', order = TRUE
+)
+for (i in seq_along(p_list)) {
+  p_list[[i]] <- p_list[[i]] +
+    scale_colour_gradient2(low = "grey", mid = "#81a6b8", high = "#003366", na.value = "grey80") +
+    theme(plot.title = element_text(size = 10, face = "bold"),
+          legend.position = "right",
+          legend.key.height = unit(1, "cm"))
+}
+ggsave(file.path(out_dir, "Module_FeaturePlots.pdf"),
+       wrap_plots(p_list, ncol = 3), width = 12, height = 12)
+```
+
+```{r fig6H-DMEs}
+# Fig 6H: differential module eigengenes, each Braak stage vs non-PD (Braak 0).
+# FindDMEs sets negative MEs to zero and runs a Wilcoxon test (Bonferroni-adjusted p).
+control_barcodes <- rownames(subset(rna.combined@meta.data, Braak == "0"))
+
+dme_list <- list()
+for (group in c("4", "6")) {
+  experimental_barcodes <- rownames(subset(rna.combined@meta.data, Braak == group))
+  # barcodes1 = Braak stage, barcodes2 = non-PD; positive logFC = higher in PD
+  res <- FindDMEs(
+    rna.combined,
+    barcodes1 = experimental_barcodes,
+    barcodes2 = control_barcodes,
+    test.use = "wilcox",
+    harmonized = TRUE,
+    wgcna_name = "wgcna_1"
+  )
+  res$Comparison <- paste0(group, "_vs_0")
+  res$Module <- rownames(res)
+  dme_list[[group]] <- res
+}
+all_dme_results <- do.call(rbind, dme_list)
+write.csv(all_dme_results, file.path(out_dir, "DME_Braak_vs_nonPD.csv"), row.names = FALSE)
+
+# Dot plot: colour = avg log2FC, size = -log10(adjusted p), capped at 20
+plot_data <- all_dme_results %>%
+  mutate(
+    log_p = pmin(-log10(p_val_adj), 20),
+    Comparison = factor(Comparison, levels = c("6_vs_0", "4_vs_0"))
+  )
+
+p_dme <- ggplot(plot_data, aes(x = Comparison, y = reorder(Module, avg_log2FC), color = avg_log2FC)) +
+  geom_point(aes(size = log_p)) +
+  scale_color_gradient2(
+    low = "#31869bff", mid = "gray", high = "#963634ff",
+    midpoint = 0, limits = c(-1, 1), oob = scales::squish,
+    name = "avg Log2FC"
+  ) +
+  scale_size_continuous(range = c(2, 10), name = "-log10 adj. P") +
+  theme_bw() +
+  labs(x = "Braak stage vs non-PD", y = "Module") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
+        axis.text.y = element_text(face = "bold"))
+pdf(file.path(out_dir, "builtin_comparison_modules_per_condition_avglogfc_ordered.pdf"), width = 6, height = 8)
+print(p_dme)
+dev.off()
+```
+
+```{r fig6I-module-load}
+# Fig 6I: mean ME per module x SPN subcluster x Braak stage; change vs non-PD;
+# module load = sum over subclusters of |delta|
+mean_ME <- hMEs %>%
+  rownames_to_column("cell_id") %>%
+  dplyr::select(-Braak) %>%
+  pivot_longer(cols = -cell_id, names_to = "Module", values_to = "Value") %>%
+  filter(Module != "grey") %>%
+  left_join(rna.combined@meta.data %>% dplyr::select(clusters, Braak) %>% rownames_to_column("cell_id"),
+            by = "cell_id") %>%
+  group_by(Module, clusters, Braak) %>%
+  summarise(mean_ME = mean(Value, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = Braak, values_from = mean_ME, names_prefix = "B") %>%
+  mutate(across(starts_with("B"), ~ replace_na(., 0)))
+
+module_load <- mean_ME %>%
+  group_by(Module) %>%
+  summarise(
+    `Braak 4 vs non-PD` = sum(abs(B4 - B0), na.rm = TRUE),
+    `Braak 6 vs non-PD` = sum(abs(B6 - B0), na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(cols = -Module, names_to = "Comparison", values_to = "Module_Load")
+write.csv(module_load, file.path(out_dir, "Module_Load_Braak.csv"), row.names = FALSE)
+
+p_load <- ggplot(module_load, aes(x = reorder(Module, -Module_Load), y = Module_Load, fill = Comparison)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black", linewidth = 0.2) +
+  scale_fill_manual(values = c("Braak 4 vs non-PD" = "#d8b0b2ff", "Braak 6 vs non-PD" = "#5e2f31")) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"), legend.position = "bottom") +
+  labs(x = "Modules", y = "Cumulative |Delta|")
+pdf(file.path(out_dir, "Human_Module_Load_Braak.pdf"), width = 8, height = 4)
+print(p_load)
+dev.off()
+```
+
+```{r fig6J-violins}
+# Fig 6J: ME violins for modules that differ across Braak stages
+# (one-way ANOVA per module, FDR < 0.05); two-sided Wilcoxon vs non-PD (ggpubr, unadjusted)
+hMEs_long <- hMEs %>%
+  pivot_longer(cols = -Braak, names_to = "Module", values_to = "Eigengene") %>%
+  filter(Module != "grey")
+
+sig_modules <- hMEs_long %>%
+  group_by(Module) %>%
+  summarise(p_value = summary(aov(Eigengene ~ Braak))[[1]][["Pr(>F)"]][1]) %>%
+  mutate(adj_p = p.adjust(p_value, method = "fdr")) %>%
+  filter(adj_p < 0.05) %>%
+  pull(Module)
+
+for (mod in sig_modules) {
+  p_vln <- hMEs_long %>%
+    filter(Module == mod) %>%
+    ggplot(aes(x = Braak, y = Eigengene, fill = Braak)) +
+    geom_violin(trim = FALSE, scale = "width", alpha = 0.8, color = NA) +
+    stat_summary(fun = "median", geom = "point", shape = 95, size = 5, color = "black") +
+    stat_compare_means(comparisons = list(c("0", "4"), c("0", "6")), method = "wilcox.test") +
+    scale_fill_manual(values = braak_colors) +
+    theme_bw(base_size = 11) +
+    theme(legend.position = "none") +
+    labs(title = mod, y = "Eigengene", x = "Braak stage")
+  ggsave(file.path(out_dir, paste0(mod, "_ME_violin_wilcox.pdf")), p_vln, width = 5, height = 5)
+}
+```
+
+```{r save}
+saveRDS(rna.combined, file = file.path(out_dir, "rna_combined_spn_subtypes_hdwgcna_Braak.rds"))
+sessionInfo()
+```

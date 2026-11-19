@@ -1,0 +1,518 @@
+---
+title: "hdWGCNA co-expression network analysis of mouse SPNs"
+output: html_document
+---
+
+<!--
+Purpose : Co-expression network analysis (hdWGCNA) of mouse SPN subclusters
+          (control, mild 6-OHDA, MitoPark 10-11 weeks, MitoPark 15-18 weeks).
+Input   : Seurat object with annotated SPN subclusters
+          (rna.combined.subclusters_res1.5_annotated_allen_1122.rds), metadata
+          columns `Sample_group` (Control, 6OHDA, Mitopark_11, Mitopark15_18)
+          and reduction `umap_after_harmony_3`.
+Outputs : (written to out_dir)
+  - SPNs_soft_powers_sg.pdf, SPNs_dendrogram_modules_coexpression_sg.pdf   network QC
+  - hdWGCNA_modules_by_color.xlsx                                           module gene table with kME
+  - kme_coexpression_umap.pdf                                               Fig 3G (module eigengene UMAPs)
+  - GO_all_modules_combined.csv, GO_Barplot_<module>.pdf                    module GO (Molecular Function)
+  - builtin_comparison_modules_per_condition.pdf, DME_results_all_models.csv Fig 3H (FindDMEs)
+  - Module_Master_Metrics_with_Deltas.csv, Module_6OHDA_Metrics.csv,
+    Module_Load_Deltas_Stats.csv                                            module mean MEs and deltas
+  - Global_delta.pdf, Figure_Total_Loadmodule_Analysis.pdf                  Fig 3I (module load, sum |delta|)
+  - Module_<n>_summary_hME_corr_wilcox.pdf                                  Fig 3J (ME violins, Wilcoxon)
+-->
+
+```{r setup}
+# Paths: set these to your local copies
+data_dir <- "data"                      # folder containing the input Seurat object
+out_dir  <- "results/hdWGCNA_SPN_mouse" # output folder
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+library(Seurat)
+library(WGCNA)
+library(hdWGCNA)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(stringr)
+library(purrr)
+library(ggplot2)
+library(cowplot)
+library(patchwork)
+library(ggpubr)
+library(writexl)
+library(clusterProfiler)
+library(org.Mm.eg.db)
+
+theme_set(theme_cowplot())
+set.seed(12345)
+```
+
+## 1. Input and SPN selection
+
+```{r input}
+rna.combined_sub <- readRDS(file.path(data_dir, "rna.combined.subclusters_res1.5_annotated_allen_1122.rds"))
+
+# Remove the Splatter cluster
+rna.combined_sub <- subset(x = rna.combined_sub, idents = setdiff(unique(Idents(rna.combined_sub)), c("Splatter")))
+
+# Remove residual non-SPN nuclei in a defined UMAP region
+umap_data <- Embeddings(rna.combined_sub, reduction = "umap_after_harmony_3")
+cells_to_keep <- !(umap_data[, 1] >= -9 & umap_data[, 1] <= -3 &
+                     umap_data[, 2] >= -14 & umap_data[, 2] <= -3)
+rna.combined_sub <- subset(rna.combined_sub, cells = colnames(rna.combined_sub)[cells_to_keep])
+rna.combined_sub$clusters <- Idents(rna.combined_sub)
+```
+
+## 2. Network construction
+
+```{r network}
+# Genes expressed in >= 5% of nuclei
+rna.combined <- SetupForWGCNA(
+  rna.combined_sub,
+  gene_select = "fraction",
+  fraction = 0.05,
+  wgcna_name = "wgcna_1"
+)
+
+# Metacells per subcluster x sample group
+rna.combined <- MetacellsByGroups(
+  seurat_obj = rna.combined,
+  group.by = c("clusters", "Sample_group"),
+  reduction = "umap_after_harmony_3",
+  k = 20,          # nearest neighbours
+  max_shared = 10, # maximum shared cells between two metacells
+  ident.group = "Sample_group"
+)
+rna.combined <- NormalizeMetacells(rna.combined)
+
+# Expression matrix: all sample groups
+valid_groups <- as.character(rna.combined$Sample_group)
+rna.combined <- SetDatExpr(
+  rna.combined,
+  group_name = valid_groups,
+  group.by = "Sample_group",
+  assay = "RNA",
+  layer = "data"
+)
+
+# Soft-power threshold (signed network)
+rna.combined <- TestSoftPowers(rna.combined, networkType = "signed")
+plot_list <- PlotSoftPowers(rna.combined)
+pdf(file.path(out_dir, "SPNs_soft_powers_sg.pdf"), width = 8, height = 7)
+print(wrap_plots(plot_list, ncol = 2))
+dev.off()
+
+# Co-expression network (soft power 9)
+rna.combined <- ConstructNetwork(
+  rna.combined, soft_power = 9,
+  tom_name = "SPNs_sg", overwrite_tom = TRUE
+)
+pdf(file.path(out_dir, "SPNs_dendrogram_modules_coexpression_sg.pdf"), width = 8, height = 7)
+print(PlotDendrogram(rna.combined, main = "SPNs clusters hdWGCNA Dendrogram for Sample groups"))
+dev.off()
+```
+
+## 3. Module eigengenes, connectivity and module names
+
+```{r eigengenes}
+# ScaleData is required before ModuleEigengenes
+rna.combined <- ScaleData(rna.combined, features = VariableFeatures(rna.combined))
+rna.combined <- ModuleEigengenes(rna.combined)
+
+# Eigengene-based connectivity (kME) and module renaming (Module_1 ... Module_n)
+rna.combined <- ModuleConnectivity(rna.combined)
+rna.combined <- ResetModuleNames(rna.combined, new_name = "Module_")
+
+# MEs per nucleus (after renaming, so columns are Module_1 ... Module_n), with sample group
+hMEs <- GetMEs(rna.combined)
+hMEs$Sample_group <- rna.combined$Sample_group
+
+# Module colour key (hdWGCNA colour -> module name)
+module_color_map <- data.frame(
+  module = c("Module_1", "Module_2", "Module_3", "Module_4", "Module_5",
+             "Module_6", "Module_7", "Module_8"),
+  color = c("yellow", "turquoise", "brown", "red", "blue",
+            "green", "black", "pink")
+)
+```
+
+## 4. Module gene table
+
+```{r module_table}
+modules <- GetModules(rna.combined) %>% subset(module != "grey")
+write_xlsx(modules, path = file.path(out_dir, "hdWGCNA_modules_by_color.xlsx"))
+
+# Remove predicted/unannotated genes (Gm*, AC*, AP*, AL*, *Rik) before GO
+modules <- modules %>%
+  filter(!str_detect(gene_name, "^(Gm|AC|AP|AL)|Rik$"))
+```
+
+## 5. Module eigengene UMAPs (Fig 3G)
+
+```{r feature_plots}
+plot_list <- ModuleFeaturePlot(
+  rna.combined, reduction = "umap_after_harmony_3",
+  features = "hMEs",
+  order = TRUE
+)
+plot_list <- lapply(plot_list, function(p) p + theme(legend.position = "right"))
+
+pdf(file.path(out_dir, "kme_coexpression_umap.pdf"), width = 12, height = 7)
+print(wrap_plots(plot_list, ncol = 4))
+dev.off()
+```
+
+## 6. GO enrichment per module (Molecular Function)
+
+```{r module_GO}
+all_GO_results <- data.frame()
+modules_to_analyze <- modules %>% filter(module != "grey") %>% pull(module) %>% unique()
+
+for (mod in modules_to_analyze) {
+  genes <- modules %>% filter(module == mod) %>% pull(gene_name)
+  color <- unique(modules %>% filter(module == mod) %>% pull(color))
+
+  # enrichGO defaults: one-sided hypergeometric test, BH, pvalueCutoff 0.05
+  ego <- enrichGO(gene = genes, OrgDb = "org.Mm.eg.db", keyType = "SYMBOL", ont = "MF")
+  ego_df <- as.data.frame(ego)
+  ego_df$Module <- mod
+  ego_df$color <- color
+  all_GO_results <- bind_rows(all_GO_results, ego_df)
+
+  pdf(file.path(out_dir, paste0("GO_Barplot_", mod, ".pdf")), width = 8, height = 6)
+  print(barplot(ego, showCategory = 10, title = paste("GO for", mod)))
+  dev.off()
+}
+
+write.csv(all_GO_results, file.path(out_dir, "GO_all_modules_combined.csv"), row.names = FALSE)
+```
+
+## 7. Differential module eigengenes vs control (Fig 3H)
+
+```{r DME}
+target_groups <- c("6OHDA", "Mitopark_11", "Mitopark15_18")
+control_name <- "Control"
+control_barcodes <- rownames(subset(rna.combined@meta.data, Sample_group == control_name))
+
+dme_list <- list()
+for (group in target_groups) {
+  experimental_barcodes <- rownames(subset(rna.combined@meta.data, Sample_group == group))
+
+  # barcodes1 = disease group, barcodes2 = control; positive log2FC = higher in disease
+  res <- FindDMEs(
+    rna.combined,
+    barcodes1 = experimental_barcodes,
+    barcodes2 = control_barcodes,
+    test.use = "wilcox",
+    harmonized = TRUE,
+    wgcna_name = "wgcna_1"
+  )
+  res$Comparison <- paste0(group, "_vs_Control")
+  res$Module <- rownames(res)
+  dme_list[[group]] <- res
+}
+all_dme_results <- do.call(rbind, dme_list)
+write.csv(all_dme_results, file.path(out_dir, "DME_results_all_models.csv"), row.names = FALSE)
+
+# Dot plot: colour = avg log2FC, size = -log10 adjusted p (capped at 20)
+direction_legend <- "Color Direction:
+Blue (Negative avg Log2FC) = Suppressed/Downregulated (Loss of genes)
+Red (Positive avg Log2FC)  = Induced/Upregulated (Inflammation/Stress)
+Gray (Zero)                = No Change compared to Control"
+plot_data <- all_dme_results %>%
+  mutate(
+    log_p = -log10(p_val_adj),
+    log_p = ifelse(log_p > 20, 20, log_p),
+    Comparison = factor(Comparison, levels = c("6OHDA_vs_Control",
+                                               "Mitopark_11_vs_Control",
+                                               "Mitopark15_18_vs_Control"))
+  )
+
+p <- ggplot(plot_data, aes(x = Comparison, y = reorder(Module, log_p), color = avg_log2FC)) +
+  geom_point(aes(size = log_p)) +
+  scale_color_gradient2(
+    low = "#31869bff", mid = "gray", high = "#963634ff",
+    midpoint = 0, limits = c(-1, 1), oob = scales::squish,
+    name = "Direction & Magnitude\n(avg Log2FC)"
+  ) +
+  scale_size_continuous(range = c(2, 10), name = "Significance\n(-log10 adj. P)") +
+  theme_bw() +
+  labs(title = "Module Load across PD Models",
+       subtitle = "Directional Impact on Gene Networks",
+       x = "Experimental Model vs. Control", y = "Module",
+       caption = direction_legend) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        plot.caption = element_text(hjust = 0, size = 9, face = "italic", color = "black"))
+
+pdf(file.path(out_dir, "builtin_comparison_modules_per_condition.pdf"), width = 6, height = 8)
+print(p)
+dev.off()
+```
+
+## 8. Mean ME per subcluster and group, and deltas
+
+```{r module_deltas}
+# Mean ME per module x subcluster x sample group
+hMEs_raw <- hMEs %>%
+  dplyr::select(all_of(module_color_map$module)) %>%
+  rownames_to_column("cell_id")
+
+cell_info <- rna.combined@meta.data %>%
+  dplyr::select(clusters, Sample_group) %>%
+  rownames_to_column("cell_id")
+
+summary_raw_barplot <- hMEs_raw %>%
+  pivot_longer(cols = -cell_id, names_to = "Module", values_to = "Value") %>%
+  left_join(cell_info, by = "cell_id") %>%
+  filter(!grepl("grey", Module)) %>%
+  group_by(Module, clusters, Sample_group) %>%
+  summarise(mean_Raw = mean(Value, na.rm = TRUE), .groups = "drop")
+
+# MitoPark: deltas between stages, path length (sensitivity) and category
+master_module_metrics <- summary_raw_barplot %>%
+  pivot_wider(names_from = Sample_group, values_from = mean_Raw, names_prefix = "Group_") %>%
+  mutate(across(starts_with("Group_"), ~replace_na(., 0))) %>%
+  mutate(
+    delta_total = Group_Mitopark15_18 - Group_Control,
+    sensitivity_score = abs(Group_Mitopark_11 - Group_Control) + abs(Group_Mitopark15_18 - Group_Mitopark_11),
+    Category = case_when(
+      delta_total > 0.02 & (Group_Mitopark15_18 >= Group_Mitopark_11 & Group_Mitopark_11 >= Group_Control) ~ "Induced",
+      delta_total < -0.02 & (Group_Mitopark15_18 <= Group_Mitopark_11 & Group_Mitopark_11 <= Group_Control) ~ "Suppressed",
+      sensitivity_score > abs(delta_total) + 0.01 ~ "Transient",
+      TRUE ~ "Stable/Low Var"
+    )
+  ) %>%
+  mutate(
+    Early_Pct = ((Group_Mitopark_11 - Group_Control) / ifelse(Group_Control == 0, 1e-6, Group_Control)) * 100,
+    Late_Pct  = ((Group_Mitopark15_18 - Group_Mitopark_11) / ifelse(Group_Mitopark_11 == 0, 1e-6, Group_Mitopark_11)) * 100,
+    Total_Pct = ((Group_Mitopark15_18 - Group_Control) / ifelse(Group_Control == 0, 1e-6, Group_Control)) * 100
+  ) %>%
+  mutate(across(ends_with("_Pct"), ~ ifelse(is.infinite(.), NA, .))) %>%
+  arrange(clusters, desc(sensitivity_score)) %>%
+  mutate(
+    Delta_Early = Group_Mitopark_11 - Group_Control,
+    Delta_Late  = Group_Mitopark15_18 - Group_Mitopark_11
+  ) %>%
+  dplyr::select(Module, clusters, Group_Control, Group_Mitopark_11, Group_Mitopark15_18,
+                Delta_Early, Delta_Late, delta_total,
+                sensitivity_score, Category, everything())
+write.csv(master_module_metrics, file.path(out_dir, "Module_Master_Metrics_with_Deltas.csv"), row.names = FALSE)
+
+# Mild 6-OHDA: delta vs control and category
+master_6oda_metrics <- summary_raw_barplot %>%
+  filter(Sample_group %in% c("Control", "6OHDA")) %>%
+  pivot_wider(names_from = Sample_group, values_from = mean_Raw, names_prefix = "Group_") %>%
+  mutate(across(starts_with("Group_"), ~replace_na(., 0))) %>%
+  mutate(
+    delta_total = Group_6OHDA - Group_Control,
+    sensitivity_score = abs(Group_6OHDA - Group_Control),
+    Category = case_when(
+      delta_total > 0.05  ~ "Induced",
+      delta_total < -0.05 ~ "Suppressed",
+      TRUE                ~ "Stable/Low Var"
+    ),
+    Total_Pct = ((Group_6OHDA - Group_Control) / ifelse(Group_Control == 0, 1e-6, Group_Control)) * 100
+  ) %>%
+  arrange(clusters, desc(sensitivity_score))
+write.csv(master_6oda_metrics, file.path(out_dir, "Module_6OHDA_Metrics.csv"), row.names = FALSE)
+```
+
+## 9. Module load (Fig 3I)
+
+```{r module_load}
+# Per module x subcluster: Welch t-tests of ME between groups (BH-adjusted)
+get_stage_stats <- function(mod, clus, seurat_obj, hme_matrix) {
+  cell_names <- colnames(seurat_obj)[seurat_obj$clusters == clus]
+  if (length(cell_names) < 5) return(NULL)
+
+  test_data <- data.frame(
+    val = hme_matrix[cell_names, mod],
+    grp = factor(seurat_obj$Sample_group[cell_names])
+  )
+  run_t <- function(g1, g2) {
+    sub <- test_data %>% filter(grp %in% c(g1, g2))
+    if (length(unique(sub$grp)) < 2) return(NA)
+    t.test(val ~ grp, data = sub)$p.value
+  }
+  data.frame(
+    P_Early = run_t("Control", "Mitopark_11"),
+    P_Late  = run_t("Mitopark_11", "Mitopark15_18"),
+    P_Total = run_t("Control", "Mitopark15_18"),
+    P_6OHDA = run_t("Control", "6OHDA")
+  )
+}
+
+# Deltas of mean ME per module x subcluster
+master_table <- summary_raw_barplot %>%
+  pivot_wider(names_from = Sample_group, values_from = mean_Raw, names_prefix = "Group_") %>%
+  mutate(across(starts_with("Group_"), ~replace_na(., 0))) %>%
+  mutate(
+    Delta_Early = Group_Mitopark_11 - Group_Control,
+    Delta_Late  = Group_Mitopark15_18 - Group_Mitopark_11,
+    Delta_Total = Group_Mitopark15_18 - Group_Control,
+    Delta_6OHDA = Group_6OHDA - Group_Control,
+    Sensitivity_Mito = abs(Delta_Early) + abs(Delta_Late),
+    Sensitivity_6OHDA = abs(Delta_6OHDA)
+  )
+
+master_final <- master_table %>%
+  rowwise() %>%
+  mutate(stats = list(get_stage_stats(Module, clusters, rna.combined, hMEs))) %>%
+  unnest(stats) %>%
+  ungroup() %>%
+  mutate(across(starts_with("P_"), ~ p.adjust(., method = "BH"), .names = "{.col}_adj")) %>%
+  mutate(across(ends_with("_adj"),
+                ~ case_when(. < 0.001 ~ "***", . < 0.01 ~ "**", . < 0.05 ~ "*", TRUE ~ "ns"),
+                .names = "{.col}_sig"))
+write.csv(master_final, file.path(out_dir, "Module_Load_Deltas_Stats.csv"), row.names = FALSE)
+
+# Global burden: sum |delta| over all modules and subclusters, per model
+global_condition_load <- master_final %>%
+  summarise(
+    `Mitopark (Total)` = sum(abs(Delta_Total), na.rm = TRUE),
+    `Mitopark (early)` = sum(abs(Delta_Early), na.rm = TRUE),
+    `Mitopark (late)`  = sum(abs(Delta_Late), na.rm = TRUE),
+    `6-OHDA Lesion`    = sum(abs(Delta_6OHDA), na.rm = TRUE)
+  ) %>%
+  pivot_longer(cols = everything(), names_to = "Condition", values_to = "Total_Abs_Delta")
+
+# Module load: sum |delta| over subclusters, per module and model
+Module_load_summary <- master_final %>%
+  group_by(Module) %>%
+  summarise(
+    `Mitopark (Total)` = sum(abs(Delta_Total), na.rm = TRUE),
+    `Mitopark (early)` = sum(abs(Delta_Early), na.rm = TRUE),
+    `Mitopark (late)`  = sum(abs(Delta_Late), na.rm = TRUE),
+    `6-OHDA Lesion`    = sum(abs(Delta_6OHDA), na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(cols = -Module, names_to = "Condition", values_to = "Moduleload")
+
+load_colors <- c(
+  "Mitopark (early)" = "#d8b0b2ff",
+  "Mitopark (late)"  = "#84484aff",
+  "Mitopark (Total)" = "#5e2f31",
+  "6-OHDA Lesion"    = "#be7b7eff"
+)
+
+p_global_load <- ggplot(global_condition_load, aes(x = reorder(Condition, -Total_Abs_Delta), y = Total_Abs_Delta, fill = Condition)) +
+  geom_bar(stat = "identity", color = "white", linewidth = 0.5, width = 0.6) +
+  scale_fill_manual(values = load_colors) +
+  theme_bw() +
+  theme(legend.position = "none") +
+  labs(title = "Global Transcriptomic Burden",
+       subtitle = "Sum of absolute ME shifts across all modules and subclusters",
+       x = "Disease Model", y = "Total Load (Cumulative |Δ|)")
+pdf(file.path(out_dir, "Global_delta.pdf"), width = 5, height = 5)
+print(p_global_load)
+dev.off()
+
+p_module_load <- ggplot(Module_load_summary, aes(x = reorder(Module, -Moduleload), y = Moduleload, fill = Condition)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black", linewidth = 0.2) +
+  scale_fill_manual(values = load_colors) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
+        legend.position = "bottom") +
+  labs(title = "Module load",
+       subtitle = "Sum of absolute ME shifts per module (Σ|Δ|)",
+       x = "Modules", y = "Module Load (Cumulative |Δ|)")
+pdf(file.path(out_dir, "Figure_Total_Loadmodule_Analysis.pdf"), width = 10, height = 5)
+print(p_module_load)
+dev.off()
+```
+
+## 10. ME violins and intra-module correlation (Fig 3J)
+
+```{r violins}
+# Comparisons vs control (two-sided Wilcoxon, ggpubr, unadjusted)
+pairwise_comparisons <- list(
+  c("Control", "6OHDA"),
+  c("Control", "Mitopark_11"),
+  c("Control", "Mitopark15_18")
+)
+group_colors <- c(
+  "Control"       = "#858585",
+  "6OHDA"         = "#84484aff",
+  "Mitopark_11"   = "#d8b0b2ff",
+  "Mitopark15_18" = "#be7b7eff"
+)
+
+# MEs in long format
+hMEs_long <- hMEs %>%
+  pivot_longer(cols = -Sample_group, names_to = "Module", values_to = "Eigengene") %>%
+  filter(Module != "grey")
+
+# Modules plotted: one-way ANOVA across sample groups, FDR < 0.05
+module_stats <- hMEs_long %>%
+  group_by(Module) %>%
+  summarise(p_value = summary(aov(Eigengene ~ Sample_group))[[1]][["Pr(>F)"]][1]) %>%
+  mutate(adj_p = p.adjust(p_value, method = "fdr")) %>%
+  arrange(adj_p)
+sig_modules <- module_stats %>% filter(adj_p < 0.05) %>% pull(Module)
+
+hMEs_sig <- hMEs_long %>%
+  filter(Module %in% sig_modules) %>%
+  left_join(module_color_map, by = c("Module" = "module"))
+
+# Intra-module gene-gene |Pearson r| per sample group
+modules_df <- GetModules(rna.combined) %>% filter(module != "grey")
+mods <- unique(modules_df$module)
+groups <- unique(rna.combined$Sample_group)
+
+corr_values <- data.frame()
+for (mod in mods) {
+  mod_genes <- modules_df %>% filter(module == mod) %>% pull(gene_name)
+  for (grp in groups) {
+    cells <- WhichCells(rna.combined, expression = Sample_group == grp)
+    expr_mat <- GetAssayData(rna.combined, assay = "RNA", slot = "data")[mod_genes, cells, drop = FALSE]
+    if (nrow(expr_mat) < 3 || ncol(expr_mat) < 10) next
+    expr_mat <- expr_mat[apply(expr_mat, 1, sd, na.rm = TRUE) > 0, , drop = FALSE]
+    if (nrow(expr_mat) < 3) next
+    cor_mat <- cor(t(as.matrix(expr_mat)), method = "pearson", use = "pairwise.complete.obs")
+    corr_values <- rbind(corr_values,
+                         data.frame(module = mod, group = grp, correlation = abs(cor_mat[lower.tri(cor_mat)])))
+  }
+}
+
+for (mod in unique(hMEs_sig$Module)) {
+  module_color <- module_color_map$color[module_color_map$module == mod]
+
+  # ME distribution per group; line = median
+  hme_plot <- hMEs_sig %>%
+    filter(Module == mod) %>%
+    ggplot(aes(x = Sample_group, y = Eigengene, fill = Sample_group)) +
+    geom_violin(trim = FALSE, scale = "width", alpha = 0.8, color = NA) +
+    facet_wrap(~ Module, scales = "free_y") +
+    stat_summary(fun = "median", geom = "point", shape = 95, size = 5, color = "black") +
+    stat_compare_means(comparisons = pairwise_comparisons, method = "wilcox.test") +
+    theme_bw(base_size = 11) +
+    labs(title = paste("Module Eigengene Expression:", mod, "-", module_color), y = "Eigengene", x = "Sample Group") +
+    theme(legend.position = "none", strip.text = element_text(size = 10, face = "bold")) +
+    scale_fill_manual(values = group_colors)
+
+  # Intra-module correlation per group
+  corr_plot <- corr_values %>%
+    filter(module == mod) %>%
+    ggplot(aes(x = group, y = correlation, fill = group)) +
+    geom_violin(trim = FALSE, scale = "width", alpha = 1) +
+    stat_compare_means(comparisons = pairwise_comparisons, method = "wilcox.test", label = "p.signif") +
+    ylim(0, 1) +
+    theme_bw() +
+    labs(title = paste("Intra-Module Correlations:", mod), x = "Sample Group", y = "Correlation") +
+    theme(axis.text.x = element_text(angle = 0, hjust = 1)) +
+    scale_fill_manual(values = group_colors)
+
+  ggsave(
+    filename = file.path(out_dir, paste0(mod, "_summary_hME_corr_wilcox.pdf")),
+    plot = hme_plot + corr_plot + plot_layout(ncol = 2),
+    width = 11, height = 5
+  )
+}
+```
+
+```{r save}
+saveRDS(rna.combined, file.path(out_dir, "rna_combined_spn_subtypes_hdwgcna.rds"))
+sessionInfo()
+```

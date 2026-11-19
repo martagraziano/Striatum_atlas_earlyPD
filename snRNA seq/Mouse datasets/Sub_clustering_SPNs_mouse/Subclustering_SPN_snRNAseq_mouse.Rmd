@@ -17,7 +17,7 @@ paramSweep <- function(seu, PCs=1:10, sct = FALSE, num.cores=1) {
   min.cells <- round(nrow(seu@meta.data)/(1-0.05) - nrow(seu@meta.data))
   pK.test <- round(pK*min.cells)
   pK <- pK[which(pK.test >= 1)]
-
+Z:\dmclab\Marta\PD\STZ:\dmclab\Marta\PD\ST
   ## Extract pre-processing parameters from original data analysis workflow
   orig.commands <- seu@commands
 
@@ -972,7 +972,7 @@ if (n_clusters > 12) {
 }
 
 
-p<-DimPlot(object = rna.combined, reduction = "umap_after_harmony_3", pt.size = 0.8, label = F,cols=alpha(cl.colors,0.5) ,label.size = 4) + ggtitle("Subclustering clusters for mouse snRNAseq dataset")+ theme_classic()
+p<-DimPlot(object = sn_object, reduction = "umap_after_harmony_3", pt.size = 0.8, label = F,cols=alpha(cl.colors,0.5) ,label.size = 4) + ggtitle("Subclustering clusters for mouse snRNAseq dataset")+ theme_classic()
 plot_filename <- paste0(plot_directory, "/UMAP_ANNOTATED_pc41_res0.4_cols_allen_annotated_label_col", ".pdf")
   #png(plot_filename, width = 1800, height = 600) 
   pdf(plot_filename, width = 10, height = 8)  # Adjust width and height as desired
@@ -1492,7 +1492,7 @@ plot_filename <- paste0(plot_directory, "/barplot_de_norm_02_nospl_allgenes", ".
 RColorBrewer::display.brewer.pal(n=10, name = "Blues")
 blues <- RColorBrewer::brewer.pal(n = 5, name = "Blues") 
 # Step 3: Reverse the 'blues' palette
-de_6ohda_merge <- de_6ohda_merge[order(de_6ohda_merge$norm, decreasing = FALSE), ] #reorder by affected clusters so that the last ones are the affected ones. We assign them the blues gradient in line below
+de_6ohda_merge <- de_6ohda_merge[order  , ] #reorder by affected clusters so that the last ones are the affected ones. We assign them the blues gradient in line below
 de_6ohda_merge$colors <- c(rep("grey", 6), blues)
 
 cl.colors.affected <-c("#3c8cc3ff","#08306bff","#6baed6ff","grey","grey","grey","grey","#07519cff","#c6dbefff","grey","grey","grey","grey","grey")  #manually select colors ordered like the clusters in the umap
@@ -1951,6 +1951,84 @@ result<- na.omit(result)
  }
 
 
-
 ```
 
+```{r}
+
+sn_object <- readRDS("Z:/dmclab/Marta/PD/Combined_snRNAseq/data/rna.combined.subclusters_res1.5_annotated_allen_1122.rds")
+
+library(Seurat)
+library(SeuratDisk)
+
+# Define your snRNA-seq object variable name
+# Replace 'sn_object' with your actual Seurat object name if different
+stopifnot(exists("sn_object"))
+
+cat("All assays present:", paste(Assays(sn_object), collapse = ", "), "\n")
+cat("Original default assay:", DefaultAssay(sn_object), "\n")
+
+# ---- 1. Select RNA Assay ----
+stopifnot("RNA" %in% Assays(sn_object))
+DefaultAssay(sn_object) <- "RNA"
+assay_name <- "RNA"
+cat("Exporting from assay:", assay_name, "\n")
+cat("Assay class:", class(sn_object[[assay_name]]), "\n")
+
+# ---- 2. Handle Seurat v5 Assay5 objects ----
+# Join split layers (e.g. counts.1, counts.2 from multiple batches)
+# and cast to classic Assay for SeuratDisk compatibility.
+if (inherits(sn_object[[assay_name]], "Assay5")) {
+  cat("Detected Assay5 (Seurat v5) object -- joining layers...\n")
+  sn_object <- JoinLayers(sn_object, assay = assay_name)
+  
+  # Ensure standard layer names exist
+  stopifnot("counts" %in% Layers(sn_object[[assay_name]]))
+  
+  cat("Converting Assay5 -> classic Assay for SeuratDisk compatibility...\n")
+  sn_object[[paste0(assay_name, "3")]] <- as(
+    object = sn_object[[assay_name]],
+    Class = "Assay"
+  )
+  DefaultAssay(sn_object) <- paste0(assay_name, "3")
+  sn_object[[assay_name]] <- NULL
+  sn_object <- RenameAssays(sn_object, setNames(assay_name, paste0(assay_name, "3")))
+  assay_name <- DefaultAssay(sn_object)
+}
+
+# ---- 3. Verify counts & data slots ----
+counts_check <- GetAssayData(sn_object, assay = assay_name, slot = "counts")
+
+cat("Counts slot dims:", paste(dim(counts_check), collapse = " x "), "\n")
+cat("Counts slot max value:", max(counts_check@x), "\n")
+cat("Counts slot all-integer:", all(counts_check@x == round(counts_check@x)), "\n")
+
+if (max(counts_check@x) < 20 || !all(counts_check@x == round(counts_check@x))) {
+  stop(
+    "Counts slot does not look like real raw UMI counts (expected integer values). ",
+    "Check if raw counts were placed in another slot/assay."
+  )
+}
+
+# Ensure log-normalized data exists (run NormalizeData if data slot is empty or unnormalized)
+data_check <- GetAssayData(sn_object, assay = assay_name, slot = "data")
+if (all(data_check@x == counts_check@x)) {
+  cat("Data slot matches raw counts. Running NormalizeData to generate log1p data...\n")
+  sn_object <- NormalizeData(sn_object, assay = assay_name, normalization.method = "LogNormalize", scale.factor = 10000)
+}
+
+# 1. Explicitly write active Idents as strings into meta.data
+sn_object$cluster_name <- as.character(Idents(sn_object))
+
+# 2. Save and convert
+SaveH5Seurat(sn_object, filename = h5seurat_path, overwrite = TRUE)
+Convert(h5seurat_path, dest = "h5ad", overwrite = TRUE)
+# ---- 4. Save to h5Seurat, then convert to h5ad ----
+h5seurat_path <- "Z:/dmclab/Marta/PD/ST/tangram/snRNA_reference.h5Seurat"
+h5ad_path     <- "Z:/dmclab/Marta/PD/ST/tangram/snRNA_reference.h5ad"
+
+
+
+cat("Successfully converted snRNA-seq to:", h5ad_path, "\n")
+```
+
+```
